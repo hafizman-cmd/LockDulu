@@ -40,7 +40,7 @@ The offline shell explains how to reconnect. Availability and payments require a
 
 New sellers can create a shop from `/dashboard` using their shop name, handle, WhatsApp number and a password of at least 12 characters. After signing in, they must upload their DuitNow QR and fill in the account and bank details in Settings before buyers can reserve items.
 
-Each seller can edit their shop name and description in dashboard Settings. Drops belong to the shop that created them. The seeded “The Weekend Edit” is an example for Kedai Bundle KL, and other shops can create their own drops in Settings.
+Each seller can edit their shop name and description and choose a storefront image in dashboard Settings. Shops without a custom image use the default jacket. The same shop image appears across its drops. Drops belong to the shop that created them. The seeded “The Weekend Edit” is an example for Kedai Bundle KL, and other shops can create their own drops in Settings.
 
 Sellers are prompted to save their credentials in a password manager before creating a shop. The app has no self-service password reset.
 

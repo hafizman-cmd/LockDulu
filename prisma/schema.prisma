@@ -61,6 +61,7 @@ model Seller {
   storeName      String
   storeSlug      String   @unique
   bio            String
+  bannerImageUrl String?
   whatsappNumber String
   qrCodeUrl      String
   qrAccountName  String

@@ -11,7 +11,7 @@ const orderInclude = { items: { include: { garment: { include: { drop: true } } 
 export async function dashboardData(sellerId: string) {
   const seller = await db().seller.findUnique({
     where: { id: sellerId, ...existingShop },
-    select: { storeName: true, storeSlug: true, bio: true, qrCodeUrl: true, qrAccountName: true, qrBankLabel: true,
+    select: { storeName: true, storeSlug: true, bio: true, bannerImageUrl: true, qrCodeUrl: true, qrAccountName: true, qrBankLabel: true,
       shippingFee: true, holdBoxDays: true, nextItemNumber: true, status: true },
   });
   if (!seller) return null;

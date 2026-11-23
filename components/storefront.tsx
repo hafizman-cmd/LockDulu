@@ -32,6 +32,7 @@ export function Storefront({ initial }: { initial: StoreData }) {
   const [draft, setDraft] = useState<Fit | null>(null);
   const [fitError, setFitError] = useState("");
   const [dropId, setDropId] = useState<string | null>(null);
+  const [failedBanner, setFailedBanner] = useState<string | null>(null);
   useEffect(() => {
     setFit(readLocal("lockdulu.fit", emptyFit));
     setOnlyFit(readLocal("lockdulu.onlyFit", false));
@@ -58,7 +59,9 @@ export function Storefront({ initial }: { initial: StoreData }) {
           <p>{data.store.bio}</p>
           <a href="#pieces" className="hero-button"><Grid2x2 size={16} strokeWidth={1.5} /> {upcoming ? "Preview pieces" : "Browse the drop"}</a>
         </div>
-        <div className="hero-art" aria-hidden="true"><div className="hero-outline"/><span className="hero-axis axis-a"/><span className="hero-axis axis-b"/><img src="/sample/drop-jacket.svg" alt="" /></div>
+        {data.store.bannerImageUrl && data.store.bannerImageUrl !== failedBanner ?
+          <div className="hero-art hero-art-custom" aria-hidden="true"><img src={data.store.bannerImageUrl} alt="" onError={() => setFailedBanner(data.store.bannerImageUrl)} /></div> :
+          <div className="hero-art" aria-hidden="true"><div className="hero-outline"/><span className="hero-axis axis-a"/><span className="hero-axis axis-b"/><img src="/sample/drop-jacket.svg" alt="" /></div>}
       </section>
       {(data.drops.length > 1 || (looseItems && data.drops.some(entry => entry.status === "UPCOMING"))) && <label className="drop-selector">Browse drop <select value={drop?.id ?? "no-drop"} onChange={event => { setDropId(event.target.value); setCategory("All pieces"); }}>
         {looseItems && <option value="no-drop">All available pieces</option>}

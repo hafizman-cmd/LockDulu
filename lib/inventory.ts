@@ -61,7 +61,7 @@ export async function readStore(slug: string) {
   const storeSlug = slug.toLowerCase();
   const activeStore = { storeSlug, ...activeShop };
   const [seller, initialItems, initialDrops] = await Promise.all([
-    db().seller.findUnique({ where: activeStore, select: { ...storeSelect, id: true } }),
+    db().seller.findUnique({ where: activeStore, select: { ...storeSelect, bannerImageUrl: true, id: true } }),
     db().garment.findMany({ where: { seller: activeStore }, include: { drop: true }, orderBy: { code: "asc" } }),
     db().drop.findMany({ where: { seller: activeStore, status: { not: "ENDED" } }, orderBy: { scheduledAt: "asc" } }),
   ]);

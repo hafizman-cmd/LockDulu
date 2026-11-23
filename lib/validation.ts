@@ -38,6 +38,7 @@ export const settings = z.object({
 export const shopProfile = z.object({
   storeName: z.string().trim().min(2, "Use at least 2 characters for your shop name.").max(100),
   bio: z.string().trim().max(500, "Keep the shop description under 500 characters."),
+  bannerImageUrl: assetUrl.nullable().optional(),
 });
 export const newDrop = z.object({
   title: z.string().trim().min(2, "Use at least 2 characters for the drop name.").max(100),

@@ -33,6 +33,16 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
     } });
     await updateShopProfile(shop.id, { storeName: "Updated shop", bio: "Vintage clothes" });
     assert.equal((await readStore(shop.storeSlug))?.store.bio, "Vintage clothes");
+    assert.equal((await readStore(shop.storeSlug))?.store.bannerImageUrl, null);
+    const bannerImageUrl = "/api/media/12345678-1234-1234-1234-123456789012.webp";
+    await updateShopProfile(shop.id, { storeName: "Updated shop", bio: "Vintage clothes", bannerImageUrl });
+    assert.equal((await dashboardData(shop.id))?.seller.bannerImageUrl, bannerImageUrl);
+    assert.equal((await readStore(shop.storeSlug))?.store.bannerImageUrl, bannerImageUrl);
+    assert.equal((await readStore(otherShop.storeSlug))?.store.bannerImageUrl, null);
+    await updateShopProfile(shop.id, { storeName: "Updated shop", bio: "Vintage clothes" });
+    assert.equal((await readStore(shop.storeSlug))?.store.bannerImageUrl, bannerImageUrl);
+    await updateShopProfile(shop.id, { storeName: "Updated shop", bio: "Vintage clothes", bannerImageUrl: null });
+    assert.equal((await readStore(shop.storeSlug))?.store.bannerImageUrl, null);
     assert.equal((await readShopDirectory("Updated shop"))[0].bio, "Vintage clothes");
     assert.equal((await dashboardData(otherShop.id))?.seller.bio, "Test");
     const ownDrop = await createDrop(shop.id, { title: "Own collection", scheduledAt: null });
