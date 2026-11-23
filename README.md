@@ -35,3 +35,9 @@ The seed preserves existing orders, inventory changes, and settings when rerun. 
 Run `npm run typecheck`, `npm run build`, and `npm start`. The service worker registers in the production build. Use HTTPS for installation and seller sessions. Set `APP_ORIGIN` to the public HTTPS origin when proxying the app. For Vercel, connect a private Blob store to the project and ensure `BLOB_STORE_ID` is available in the deployment environment. The Blob SDK uses Vercel's OIDC credentials automatically. A `BLOB_READ_WRITE_TOKEN` also works for local development or older store connections. Existing files in `public/uploads/` need to be transferred to the Blob store before using them on Vercel. Keep the receipt encryption secret with your backups. Rotating it requires preserving a way to decrypt existing receipts.
 
 The offline shell explains how to reconnect. Availability and payments require a network connection so the app can check live inventory and order state.
+
+## Seller accounts
+
+New sellers can create a shop from `/dashboard` using their shop name, handle, WhatsApp number and a password of at least 12 characters. After signing in, they must upload their DuitNow QR and fill in the account and bank details in Settings before buyers can reserve items.
+
+Sellers are prompted to save their credentials in a password manager before creating a shop. The app has no self-service password reset.

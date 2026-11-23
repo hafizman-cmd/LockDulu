@@ -20,23 +20,52 @@ const tabs = [
 
 export function SellerLogin() {
   const router = useRouter();
+  const [registering, setRegistering] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [createdHandle, setCreatedHandle] = useState("");
+
   return <>
     <Header seller />
     <main className="wrap secondary-page"><div className="section-intro">
-      <span className="eyebrow"><ShieldCheck size={17} strokeWidth={1.5} /> Seller tools</span><h1>Seller sign in</h1><p>Manage your live inventory and verify DuitNow receipts.</p>
+      <span className="eyebrow"><ShieldCheck size={17} strokeWidth={1.5} /> Seller tools</span>
+      <h1>{registering ? "Create your shop" : "Seller sign in"}</h1>
+      <p>{registering ? "Create an account to manage your shop." : "Manage your live inventory and verify DuitNow receipts."}</p>
     </div>
-    <form className="surface stack lookup" onSubmit={async event => {
+    <form key={registering ? "register" : "login"} className="surface stack lookup" onSubmit={async event => {
       event.preventDefault(); setError(""); setBusy(true);
       const form = new FormData(event.currentTarget);
-      try { await action("login", { slug: form.get("slug"), password: form.get("password") }); router.refresh(); }
-      catch (exception) { setError(message(exception)); } finally { setBusy(false); }
+      const slug = form.get("slug");
+      const password = form.get("password");
+      try {
+        if (registering) {
+          if (password !== form.get("confirmPassword")) throw new Error("Passwords do not match.");
+          await action("register", { storeName: form.get("storeName"), slug, whatsappNumber: form.get("whatsappNumber"), password });
+          setCreatedHandle(String(slug).trim().toLowerCase());
+          setRegistering(false);
+        } else {
+          await action("login", { slug, password });
+          router.refresh();
+        }
+      } catch (exception) { setError(message(exception)); } finally { setBusy(false); }
     }}>
-      <label>Store handle<input name="slug" autoComplete="username" placeholder="kedaibundle.kl" maxLength={80} required /></label>
-      <label>Password<input name="password" type="password" maxLength={256} autoComplete="current-password" required /></label>
+      {registering && <label>Shop name<input name="storeName" minLength={2} maxLength={100} required /></label>}
+      <label>Store handle<input name="slug" autoComplete="username" placeholder="kedaibundle.kl" defaultValue={registering ? "" : createdHandle} maxLength={80} required /></label>
+      {registering && <label>WhatsApp number<input name="whatsappNumber" type="tel" placeholder="0123456789" maxLength={30} required /></label>}
+      <label>Password<input name="password" type="password" minLength={registering ? 12 : 1} maxLength={256} autoComplete={registering ? "new-password" : "current-password"} required /></label>
+      {registering && <>
+        <label>Confirm password<input name="confirmPassword" type="password" minLength={12} maxLength={256} autoComplete="new-password" required /></label>
+        <Notice>Save your store handle and password in a password manager. LockDulu has no password reset.</Notice>
+        <label className="notice"><input type="checkbox" name="credentialsSaved" required /> I have saved my sign-in details.</label>
+      </>}
       {error && <Notice>{error}</Notice>}
-      <button className="button primary" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+      {!registering && createdHandle && <Notice success>Shop created. Sign in, then add your payment QR in Settings before accepting orders.</Notice>}
+      <button className="button primary" disabled={busy}>{busy ? "Please wait..." : registering ? "Create shop" : "Sign in"}</button>
+      <button type="button" disabled={busy} onClick={() => {
+        setRegistering(!registering);
+        setCreatedHandle("");
+        setError("");
+      }}>{registering ? "Back to sign in" : "Create a shop"}</button>
     </form></main>
     <Footer />
   </>;

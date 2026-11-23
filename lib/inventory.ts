@@ -113,6 +113,7 @@ export async function lockItem(id: string, token: string) {
     }
     const garment = await tx.garment.findUniqueOrThrow({ where: { id }, include: { seller: true } });
     const seller = garment.seller;
+    if (!seller.qrCodeUrl) throw new HttpError("This store has not set up its payment QR yet.", 409);
     const order = await tx.order.create({ data: {
       sellerId: seller.id, buyerAccessHash: hash, garmentCode: garment.code, itemAmount: garment.price,
       shippingFee: seller.shippingFee, totalAmount: garment.price.plus(seller.shippingFee), holdBoxDays: seller.holdBoxDays,

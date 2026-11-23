@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { HttpError, limitBody, requireOrigin, respond } from "@/lib/http";
 import { lockItem, orderState, reviewOrder } from "@/lib/inventory";
-import { checkPassword } from "@/lib/password";
+import { checkPassword, passwordHash } from "@/lib/password";
 import { currentSeller, sellerSession, sessionCookie, sessionSeconds } from "@/lib/security";
 import { dashboardData, deleteGarment, listGarment, lockerLookup, markShipped, requestDispatch, updateSettings } from "@/lib/seller";
 import { id, listing, phone, settings, token } from "@/lib/validation";
@@ -11,11 +11,11 @@ import { id, listing, phone, settings, token } from "@/lib/validation";
 const attempts = new Map<string, { count: number; until: number }>();
 const perMinute = 60_000;
 
-function limitLogin(key: string) {
+function limitAttempts(key: string, message: string) {
   const now = Date.now();
   for (const [name, entry] of attempts) if (entry.until <= now) attempts.delete(name);
   const entry = attempts.get(key) ?? { count: 0, until: now + perMinute };
-  if (entry.count >= 8) throw new HttpError("Too many sign-in attempts. Try again in a minute.", 429);
+  if (entry.count >= 8) throw new HttpError(message, 429);
   entry.count += 1;
   attempts.set(key, entry);
 }
@@ -29,11 +29,27 @@ export async function POST(request: Request) {
       case "order": return orderState(id.parse(body.id), token.parse(body.token));
       case "locker": return { orders: await lockerLookup(phone.parse(body.phone), z.array(token).max(100).parse(body.tokens)) };
       case "dispatch": return requestDispatch(phone.parse(body.phone), token.parse(body.token));
+      case "register": {
+        limitAttempts("register", "Too many registration attempts. Try again in a minute.");
+        const storeName = z.string().trim().min(2).max(100).parse(body.storeName);
+        const slug = z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9._-]{1,78}[a-z0-9]$/, "Use 3 to 80 letters, numbers, dots, hyphens or underscores for the handle.").parse(body.slug);
+        if (["api", "dashboard", "item", "locker", "sample", "uploads", "_next"].includes(slug)) throw new HttpError("This store handle is reserved.", 409);
+        const password = z.string().min(12, "Use at least 12 characters for your password.").max(256).parse(body.password);
+        const whatsappNumber = phone.parse(body.whatsappNumber);
+        try {
+          await db().seller.create({ data: { storeName, storeSlug: slug, passwordHash: passwordHash(password), whatsappNumber,
+            bio: "", qrCodeUrl: "", qrAccountName: "", qrBankLabel: "" } });
+        } catch (error) {
+          if (error && typeof error === "object" && "code" in error && error.code === "P2002") throw new HttpError("That store handle is already in use.", 409);
+          throw error;
+        }
+        return { ok: true };
+      }
       case "login": {
         const slug = z.string().trim().min(1).max(80).parse(body.slug).toLowerCase().replace(/^@/, "");
         const password = z.string().min(1).max(256).parse(body.password);
         const seller = await db().seller.findUnique({ where: { storeSlug: slug }, select: { id: true, passwordHash: true } });
-        limitLogin(seller?.id ?? "unknown");
+        limitAttempts(seller?.id ?? "unknown", "Too many sign-in attempts. Try again in a minute.");
         const valid = checkPassword(password, seller?.passwordHash ?? `${"0".repeat(64)}:${"0".repeat(128)}`);
         if (!seller || !valid) throw new HttpError("Check the store handle and password.", 401);
         attempts.delete(seller.id);

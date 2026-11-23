@@ -195,8 +195,8 @@ export function StoreSettings({ seller, onSaved }: { seller: DashboardData["sell
       await onSaved();
     } catch (exception) { setError(message(exception)); } finally { setBusy(false); }
   }}>
-    <div className="qr-settings"><img src={qr} alt="Current DuitNow QR" />
-      <label className="file-field"><QrCode size={23} strokeWidth={1.5} /><span>{uploading ? "Uploading QR…" : "Replace DuitNow QR"}<small>Upload the static QR from your bank or eWallet.</small></span>
+    <div className="qr-settings">{qr && <img src={qr} alt="Current DuitNow QR" />}
+      <label className="file-field"><QrCode size={23} strokeWidth={1.5} /><span>{uploading ? "Uploading QR…" : qr ? "Replace DuitNow QR" : "Upload DuitNow QR"}<small>Upload the static QR from your bank or eWallet.</small></span>
         <input type="file" aria-label="Replace DuitNow QR" accept="image/*" disabled={uploading || busy} onChange={async event => {
           const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
           setUploading(true); setError("");
