@@ -11,6 +11,11 @@ const receiptName = /^[a-f0-9-]{36}\.bin$/;
 export const maxUpload = 10 * 1024 * 1024;
 const root = path.join(process.cwd(), "public", "uploads");
 
+function useBlob() {
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN ||
+    (process.env.BLOB_STORE_ID && (process.env.VERCEL || process.env.VERCEL_OIDC_TOKEN)));
+}
+
 function encrypt(image: Buffer) {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", appKey("receipt encryption"), iv);
@@ -41,12 +46,12 @@ export const storage = {
     const sealed = kind === "receipt";
     const name = randomUUID() + (sealed ? ".bin" : ".webp");
     const content = sealed ? encrypt(image) : image;
-    if (process.env.BLOB_READ_WRITE_TOKEN) {
+    if (useBlob()) {
       await put(`lockdulu/${name}`, content, {
         access: "private", contentType: sealed ? "application/octet-stream" : "image/webp",
       });
     } else {
-      if (process.env.VERCEL) throw new Error("BLOB_READ_WRITE_TOKEN is required on Vercel.");
+      if (process.env.VERCEL) throw new Error("Connect a Blob store to this Vercel project.");
       await mkdir(root, { recursive: true });
       await writeFile(path.join(root, name), content, { flag: "wx" });
     }
@@ -54,7 +59,7 @@ export const storage = {
   },
   async removeReceipt(name: string) {
     if (!receiptName.test(name)) return;
-    if (process.env.BLOB_READ_WRITE_TOKEN) {
+    if (useBlob()) {
       await del(`lockdulu/${name}`).catch(error => console.error(error));
     } else {
       await unlink(path.join(root, name)).catch(error => console.error(error));
@@ -63,7 +68,7 @@ export const storage = {
   async read(name: string, sealed = false) {
     if (!(sealed ? receiptName : imageName).test(name)) throw new HttpError("Image not found.", 404);
     let content: Buffer | null = null;
-    if (process.env.BLOB_READ_WRITE_TOKEN) {
+    if (useBlob()) {
       const result = await get(`lockdulu/${name}`, { access: "private" });
       if (result?.statusCode === 200) content = Buffer.from(await new Response(result.stream).arrayBuffer());
     }
