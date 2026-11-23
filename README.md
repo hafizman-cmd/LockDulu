@@ -20,7 +20,7 @@ Use Node.js 22.18 or newer and a Turso database dedicated to LockDulu.
 
 The migration command applies and records SQL migrations on the database selected by `TURSO_DATABASE_URL`. For a local database, set `TURSO_DATABASE_URL="file:./prisma/lockdulu.db"` and leave the token blank. The Turso schema starts a fresh database. Existing PostgreSQL records require a separate data transfer.
 
-The seed preserves existing orders, inventory changes, and settings when rerun. The seller password comes from `SEED_SELLER_PASSWORD` when the seed first creates the account. Update `Seller.whatsappNumber` in the database for the live seller. Create upcoming drops with a `scheduledAt` timestamp and `UPCOMING` status. The app opens a due drop on the next catalog fetch or lock attempt.
+The seed preserves existing orders, inventory changes, and settings when rerun. The seller password comes from `SEED_SELLER_PASSWORD` when the seed first creates the account. Update `Seller.whatsappNumber` in the database for the live seller. Sellers can create live or scheduled drops from dashboard Settings. The app opens a due drop on the next catalog fetch or lock attempt.
 
 ## Checkout and fulfillment
 
@@ -39,6 +39,8 @@ The offline shell explains how to reconnect. Availability and payments require a
 ## Seller accounts
 
 New sellers can create a shop from `/dashboard` using their shop name, handle, WhatsApp number and a password of at least 12 characters. After signing in, they must upload their DuitNow QR and fill in the account and bank details in Settings before buyers can reserve items.
+
+Each seller can edit their shop name and description in dashboard Settings. Drops belong to the shop that created them. The seeded “The Weekend Edit” is an example for Kedai Bundle KL, and other shops can create their own drops in Settings.
 
 Sellers are prompted to save their credentials in a password manager before creating a shop. The app has no self-service password reset.
 

@@ -248,6 +248,8 @@ input[type="radio"],input[type="checkbox"] { accent-color: var(--olive); }
 .section-intro h1 { font-size: clamp(2rem, 6vw, 3.6rem); }
 .section-intro p { color: var(--muted-readable); }
 .lookup, .settings-form { padding: 1rem; }
+.drop-settings-list { display: grid; gap: .5rem; list-style: none; margin: 0; padding: 0; }
+.drop-settings-list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .4rem; overflow-wrap: anywhere; }
 .lookup { max-width: 520px; margin-bottom: .9rem; }
 .admin-password-field { gap: .32rem; }
 .admin-password-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; }

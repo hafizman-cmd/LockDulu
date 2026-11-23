@@ -9,7 +9,7 @@ import { adminOverview, moderateShop } from "../lib/admin.ts";
 import { db } from "../lib/db.ts";
 import { lockItem, orderState, readItem, readStore, reviewOrder, submitReceipt } from "../lib/inventory.ts";
 import { buyerStatus } from "../lib/catalog.ts";
-import { dashboardData, deleteGarment, listGarment, lockerLookup, markShipped, requestDispatch, updateSettings } from "../lib/seller.ts";
+import { createDrop, dashboardData, deleteGarment, listGarment, lockerLookup, markShipped, requestDispatch, updateSettings, updateShopProfile } from "../lib/seller.ts";
 import { readShopDirectory } from "../lib/shop-directory.ts";
 import { requireActiveSeller } from "../lib/shop-status.ts";
 
@@ -31,11 +31,22 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
     const otherShop = await db().seller.create({ data: {
       ...settings, storeSlug: "other-shop", storeName: "Other shop", bio: "Test", whatsappNumber: phone, passwordHash: "test-hash",
     } });
+    await updateShopProfile(shop.id, { storeName: "Updated shop", bio: "Vintage clothes" });
+    assert.equal((await readStore(shop.storeSlug))?.store.bio, "Vintage clothes");
+    assert.equal((await readShopDirectory("Updated shop"))[0].bio, "Vintage clothes");
+    assert.equal((await dashboardData(otherShop.id))?.seller.bio, "Test");
+    const ownDrop = await createDrop(shop.id, { title: "Own collection", scheduledAt: null });
+    const futureDrop = await createDrop(otherShop.id, { title: "Future collection", scheduledAt: new Date(Date.now() + 60_000).toISOString() });
+    assert.deepEqual((await dashboardData(shop.id))?.drops.map(drop => drop.title), ["Own collection"]);
+    assert.equal((await dashboardData(otherShop.id))?.drops[0].status, "UPCOMING");
+    await assert.rejects(createDrop(shop.id, { title: "Past", scheduledAt: new Date(Date.now() - 60_000).toISOString() }), /future launch time/);
     const listing = {
       title: "Test shirt", brand: "Test", category: "Shirt", price: "30.00", pitInches: 20, lengthInches: 26,
       conditionGrade: "LIKE_NEW", conditionNotes: "", images: ["/sample/cotton-crew-front.svg"], flawPins: [],
     } as const;
     const garment = await listGarment(shop.id, { ...listing, images: [...listing.images], flawPins: [] }, null);
+    await assert.rejects(listGarment(shop.id, { ...listing, images: [...listing.images], flawPins: [] }, futureDrop.id), /active or upcoming drop/);
+    await db().drop.update({ where: { id: ownDrop.id }, data: { status: "ENDED" } });
     const available = await listGarment(shop.id, { ...listing, images: [...listing.images], flawPins: [] }, null);
     const token = "a".repeat(64);
     const { quote } = await lockItem(garment.id, token);
@@ -78,6 +89,8 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
     await assert.rejects(listGarment(shop.id, { ...listing, images: [...listing.images], flawPins: [] }, null), { status: 403 });
     await assert.rejects(deleteGarment(shop.id, available.id), { status: 403 });
     await assert.rejects(updateSettings(shop.id, settings), { status: 403 });
+    await assert.rejects(updateShopProfile(shop.id, { storeName: "No change", bio: "" }), { status: 403 });
+    await assert.rejects(createDrop(shop.id, { title: "No drop", scheduledAt: null }), { status: 403 });
     await assert.rejects(reviewOrder(shop.id, quote.orderId, true), { status: 403 });
     await assert.rejects(markShipped(shop.id, [quote.orderId]), { status: 403 });
 

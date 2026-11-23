@@ -9,7 +9,7 @@ import { measurements, money, statuses, whatsapp } from "@/lib/catalog";
 import type { DashboardData } from "@/lib/seller";
 import { action, message, RequestError, useClock, usePolling } from "./client";
 import { Footer, Header, Notice, Sheet, Stage } from "./common";
-import { QuickList, StoreSettings } from "./seller-forms";
+import { DropSettings, QuickList, ShopProfile, StoreSettings } from "./seller-forms";
 import { ShareStorefront } from "./share-storefront";
 
 const tabs = [
@@ -211,7 +211,12 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
           </article>;
         })}
       </section>}
-      {tab === "settings" && <section className="dash-section stack"><div className="section-heading"><div><h2><QrCode size={23} strokeWidth={1.5} /> DuitNow and store settings</h2><p className="muted">Changes apply to new checkouts.</p></div></div>
+      {tab === "settings" && <section className="dash-section stack">
+        <div className="section-heading"><div><h2>Shop profile</h2><p className="muted">Update the details buyers see.</p></div></div>
+        <ShopProfile seller={seller} onSaved={async () => { setSuccess("Shop profile saved."); await refresh(); }} />
+        <div className="section-heading"><div><h2>Drops</h2><p className="muted">Create a drop and select it when you list a garment.</p></div></div>
+        <DropSettings drops={data.drops} onCreated={async () => { setSuccess("Drop created. Select it when listing a garment."); await refresh(); }} />
+        <div className="section-heading"><div><h2><QrCode size={23} strokeWidth={1.5} /> DuitNow and delivery</h2><p className="muted">Changes apply to new checkouts.</p></div></div>
         <StoreSettings seller={seller} onSaved={async () => { setSuccess("Store settings saved."); await refresh(); }} />
       </section>}
     </main>

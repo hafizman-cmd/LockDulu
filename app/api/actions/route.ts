@@ -5,8 +5,8 @@ import { HttpError, limitBody, requireOrigin, respond } from "@/lib/http";
 import { lockItem, orderState, reviewOrder } from "@/lib/inventory";
 import { checkPassword, passwordHash } from "@/lib/password";
 import { currentSeller, sellerSession, sessionCookie, sessionSeconds } from "@/lib/security";
-import { dashboardData, deleteGarment, listGarment, lockerLookup, markShipped, requestDispatch, updateSettings } from "@/lib/seller";
-import { id, listing, phone, settings, token } from "@/lib/validation";
+import { createDrop, dashboardData, deleteGarment, listGarment, lockerLookup, markShipped, requestDispatch, updateSettings, updateShopProfile } from "@/lib/seller";
+import { id, listing, newDrop, phone, settings, shopProfile, token } from "@/lib/validation";
 import { existingShop } from "@/lib/shop-status";
 
 const attempts = new Map<string, { count: number; until: number }>();
@@ -78,6 +78,8 @@ export async function POST(request: Request) {
       case "list": return listGarment(seller, listing.parse(body.listing), id.nullable().parse(body.dropId));
       case "deleteListing": return deleteGarment(seller, id.parse(body.id));
       case "settings": return updateSettings(seller, settings.parse(body.settings));
+      case "shopProfile": return updateShopProfile(seller, shopProfile.parse(body.profile));
+      case "createDrop": return createDrop(seller, newDrop.parse(body.drop));
       case "ship": return markShipped(seller, [...new Set(z.array(id).min(1).max(200).parse(body.ids))]);
       default: throw new HttpError("Unknown action.", 404);
     }

@@ -182,6 +182,58 @@ export function QuickList({ data, onClose, onListed }: { data: DashboardData; on
   </Sheet>;
 }
 
+export function ShopProfile({ seller, onSaved }: { seller: DashboardData["seller"]; onSaved: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return <form className="surface stack settings-form" onSubmit={async event => {
+    event.preventDefault(); setBusy(true); setError("");
+    const fields = new FormData(event.currentTarget);
+    try {
+      await action("shopProfile", { profile: { storeName: fields.get("storeName"), bio: fields.get("bio") } });
+      await onSaved();
+    } catch (exception) { setError(message(exception)); } finally { setBusy(false); }
+  }}>
+    <label>Shop name<input name="storeName" required minLength={2} maxLength={100} defaultValue={seller.storeName} /></label>
+    <label>Shop description<textarea name="bio" maxLength={500} rows={3} defaultValue={seller.bio} placeholder="Tell buyers about your shop" /></label>
+    <p className="muted">Your description appears in Browse shops and on your storefront.</p>
+    {error && <Notice>{error}</Notice>}
+    <button className="button primary" disabled={busy}>{busy ? "Saving…" : "Save shop profile"}</button>
+  </form>;
+}
+
+export function DropSettings({ drops, onCreated }: { drops: DashboardData["drops"]; onCreated: () => Promise<void> }) {
+  const [scheduled, setScheduled] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return <div className="surface stack settings-form">
+    {drops.length ? <ul className="drop-settings-list">{drops.map(drop => <li key={drop.id}>
+      <strong>{drop.title}</strong> <span className="badge">{drop.status === "LIVE" ? "Live" : `Upcoming · ${new Intl.DateTimeFormat("en-MY", { dateStyle: "medium", timeStyle: "short" }).format(new Date(drop.scheduledAt))}`}</span>
+    </li>)}</ul> : <p className="muted">No drops yet. Create one to group your listings.</p>}
+    <form className="stack" onSubmit={async event => {
+      event.preventDefault(); setBusy(true); setError("");
+      const form = event.currentTarget;
+      const fields = new FormData(form);
+      try {
+        const value = String(fields.get("scheduledAt") ?? "");
+        const time = scheduled ? new Date(value) : null;
+        if (scheduled && (!time || Number.isNaN(time.getTime()))) throw new Error("Choose a valid launch date and time.");
+        await action("createDrop", { drop: { title: fields.get("title"), scheduledAt: time?.toISOString() ?? null } });
+        form.reset(); setScheduled(false);
+        await onCreated();
+      } catch (exception) { setError(message(exception)); } finally { setBusy(false); }
+    }}>
+      <label>Drop name<input name="title" required minLength={2} maxLength={100} placeholder="e.g. The Weekend Edit" /></label>
+      <label>Launch<select value={scheduled ? "scheduled" : "now"} onChange={event => setScheduled(event.target.value === "scheduled")}>
+        <option value="now">Go live now</option><option value="scheduled">Schedule for later</option>
+      </select></label>
+      {scheduled && <label>Launch date and time<input type="datetime-local" name="scheduledAt" required /></label>}
+      {scheduled && <p className="muted">Uses your device’s local time. Buyers can preview the drop before it opens.</p>}
+      {error && <Notice>{error}</Notice>}
+      <button className="button primary" disabled={busy}>{busy ? "Creating…" : "Create drop"}</button>
+    </form>
+  </div>;
+}
+
 export function StoreSettings({ seller, onSaved }: { seller: DashboardData["seller"]; onSaved: () => Promise<void> }) {
   const [qr, setQr] = useState(seller.qrCodeUrl);
   const [uploading, setUploading] = useState(false);

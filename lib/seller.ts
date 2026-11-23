@@ -4,14 +4,14 @@ import { garmentImages, garmentView, openDueDrops, releaseExpired } from "./inve
 import { hashToken } from "./security.ts";
 import { activeShop, existingShop, requireActiveSeller } from "./shop-status.ts";
 import type { z } from "zod";
-import type { listing, settings } from "./validation";
+import type { listing, newDrop, settings, shopProfile } from "./validation";
 
 const orderInclude = { items: { include: { garment: { include: { drop: true } } } } } as const;
 
 export async function dashboardData(sellerId: string) {
   const seller = await db().seller.findUnique({
     where: { id: sellerId, ...existingShop },
-    select: { storeName: true, storeSlug: true, qrCodeUrl: true, qrAccountName: true, qrBankLabel: true,
+    select: { storeName: true, storeSlug: true, bio: true, qrCodeUrl: true, qrAccountName: true, qrBankLabel: true,
       shippingFee: true, holdBoxDays: true, nextItemNumber: true, status: true },
   });
   if (!seller) return null;
@@ -44,6 +44,26 @@ export async function dashboardData(sellerId: string) {
 }
 
 export type DashboardData = NonNullable<Awaited<ReturnType<typeof dashboardData>>>;
+
+export async function updateShopProfile(sellerId: string, data: z.infer<typeof shopProfile>) {
+  return writeTransaction(async tx => {
+    await requireActiveSeller(tx, sellerId);
+    await tx.seller.update({ where: { id: sellerId }, data });
+    return { ok: true };
+  });
+}
+
+export async function createDrop(sellerId: string, data: z.infer<typeof newDrop>) {
+  return writeTransaction(async tx => {
+    await requireActiveSeller(tx, sellerId);
+    const now = new Date();
+    const scheduledAt = data.scheduledAt ? new Date(data.scheduledAt) : now;
+    if (data.scheduledAt && scheduledAt <= now) throw new HttpError("Choose a future launch time, or publish the drop now.");
+    return tx.drop.create({ data: {
+      sellerId, title: data.title, scheduledAt, status: data.scheduledAt ? "UPCOMING" : "LIVE",
+    }, select: { id: true, title: true } });
+  });
+}
 
 export async function listGarment(sellerId: string, data: z.infer<typeof listing>, dropId: string | null) {
   return writeTransaction(async tx => {

@@ -36,7 +36,8 @@ export function Storefront({ initial }: { initial: StoreData }) {
     setFit(readLocal("lockdulu.fit", emptyFit));
     setOnlyFit(readLocal("lockdulu.onlyFit", false));
   }, []);
-  const drop = data.drops.find(entry => entry.id === dropId) ?? data.drops.find(entry => entry.status === "LIVE") ?? data.drops[0];
+  const looseItems = data.items.some(item => !item.dropId);
+  const drop = dropId === "no-drop" ? undefined : data.drops.find(entry => entry.id === dropId) ?? data.drops.find(entry => entry.status === "LIVE") ?? (looseItems ? undefined : data.drops[0]);
   const upcoming = drop?.status === "UPCOMING";
   const selectableItems = data.items.filter(item => drop ? item.dropId === drop.id || (drop.status === "LIVE" && !item.dropId) : !item.dropId);
   const visible = selectableItems.filter(item => (category === "All pieces" || item.category === category) &&
@@ -59,7 +60,8 @@ export function Storefront({ initial }: { initial: StoreData }) {
         </div>
         <div className="hero-art" aria-hidden="true"><div className="hero-outline"/><span className="hero-axis axis-a"/><span className="hero-axis axis-b"/><img src="/sample/drop-jacket.svg" alt="" /></div>
       </section>
-      {data.drops.length > 1 && <label className="drop-selector">Browse drop <select value={drop?.id ?? ""} onChange={event => { setDropId(event.target.value); setCategory("All pieces"); }}>
+      {(data.drops.length > 1 || (looseItems && data.drops.some(entry => entry.status === "UPCOMING"))) && <label className="drop-selector">Browse drop <select value={drop?.id ?? "no-drop"} onChange={event => { setDropId(event.target.value); setCategory("All pieces"); }}>
+        {looseItems && <option value="no-drop">All available pieces</option>}
         {data.drops.map(entry => <option key={entry.id} value={entry.id}>{entry.title} ({entry.status === "LIVE" ? "live" : "upcoming"})</option>)}
       </select></label>}
       {upcoming && <div className="launch glass"><Clock3 size={22} strokeWidth={1.5} /><div><strong>Locks open at launch</strong><p className="muted">Days / hours / minutes / seconds</p></div><strong className="timer">{timer(Date.parse(drop.scheduledAt) - now, true)}</strong></div>}
