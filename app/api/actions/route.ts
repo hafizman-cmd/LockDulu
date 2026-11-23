@@ -7,6 +7,7 @@ import { checkPassword, passwordHash } from "@/lib/password";
 import { currentSeller, sellerSession, sessionCookie, sessionSeconds } from "@/lib/security";
 import { dashboardData, deleteGarment, listGarment, lockerLookup, markShipped, requestDispatch, updateSettings } from "@/lib/seller";
 import { id, listing, phone, settings, token } from "@/lib/validation";
+import { existingShop } from "@/lib/shop-status";
 
 const attempts = new Map<string, { count: number; until: number }>();
 const perMinute = 60_000;
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
       case "login": {
         const slug = z.string().trim().min(1).max(80).parse(body.slug).toLowerCase().replace(/^@/, "");
         const password = z.string().min(1).max(256).parse(body.password);
-        const seller = await db().seller.findUnique({ where: { storeSlug: slug }, select: { id: true, passwordHash: true } });
+        const seller = await db().seller.findUnique({ where: { storeSlug: slug, ...existingShop }, select: { id: true, passwordHash: true } });
         limitAttempts(seller?.id ?? "unknown", "Too many sign-in attempts. Try again in a minute.");
         const valid = checkPassword(password, seller?.passwordHash ?? `${"0".repeat(64)}:${"0".repeat(128)}`);
         if (!seller || !valid) throw new HttpError("Check the store handle and password.", 401);

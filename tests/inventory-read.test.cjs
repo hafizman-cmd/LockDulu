@@ -10,9 +10,10 @@ function inventoryWith(database) {
   }).outputText;
   const exports = {};
   const dependencies = {
-    "./db": { db: () => database, writeTransaction: run => run(database) },
-    "./http": { HttpError: class HttpError extends Error {} },
-    "./security": { hashToken: value => value },
+    "./db.ts": { db: () => database, writeTransaction: run => run(database) },
+    "./http.ts": { HttpError: class HttpError extends Error {} },
+    "./security.ts": { hashToken: value => value },
+    "./shop-status.ts": { activeShop: { status: "ACTIVE" } },
   };
   vm.runInNewContext(source, { exports, require: name => dependencies[name], Date, Promise, Array });
   return exports;

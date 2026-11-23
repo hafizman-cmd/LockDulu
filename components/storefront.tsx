@@ -1,11 +1,12 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Clock3, Globe2, Grid2x2, MapPin, ScanLine, SlidersHorizontal, Tag } from "lucide-react";
 import type { readStore } from "@/lib/inventory";
 import { categories, measurements, money, timer } from "@/lib/catalog";
 import { ActiveLock, Footer, GarmentPhoto, Header, Sheet, Stage } from "./common";
-import { json, readLocal, useClock, usePolling, writeLocal } from "./client";
+import { json, readLocal, RequestError, useClock, usePolling, writeLocal } from "./client";
 
 type StoreData = NonNullable<Awaited<ReturnType<typeof readStore>>>;
 type Fit = { minPit: string; maxPit: string; minLength: string; maxLength: string };
@@ -15,7 +16,14 @@ const fits = (value: number, min: string, max: string) => (!min || value >= Numb
 
 export function Storefront({ initial }: { initial: StoreData }) {
   const slug = initial.store.storeSlug;
-  const get = useCallback((signal?: AbortSignal) => json<StoreData>(`/api/store/${encodeURIComponent(slug)}`, { signal }), [slug]);
+  const router = useRouter();
+  const get = useCallback(async (signal?: AbortSignal) => {
+    try { return await json<StoreData>(`/api/store/${encodeURIComponent(slug)}`, { signal }); }
+    catch (error) {
+      if (error instanceof RequestError && error.status === 404) router.refresh();
+      throw error;
+    }
+  }, [slug, router]);
   const [data] = usePolling(initial, get);
   const now = useClock(data.serverTime);
   const [category, setCategory] = useState<string>("All pieces");

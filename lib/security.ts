@@ -1,5 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies } from "next/headers.js";
 
 export const sessionCookie = "lockdulu_seller";
 export const sessionSeconds = 8 * 60 * 60;

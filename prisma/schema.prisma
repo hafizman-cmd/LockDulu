@@ -50,6 +50,12 @@ enum PaymentStatus {
   EXPIRED
 }
 
+enum ShopStatus {
+  ACTIVE
+  HELD
+  DELETED
+}
+
 model Seller {
   id             String   @id @default(cuid())
   storeName      String
@@ -62,6 +68,7 @@ model Seller {
   holdBoxDays    Int      @default(7)
   shippingFee    Decimal  @default(8.00)
   passwordHash   String
+  status         ShopStatus @default(ACTIVE)
   nextItemNumber Int      @default(1)
   createdAt      DateTime @default(now())
   drops          Drop[]

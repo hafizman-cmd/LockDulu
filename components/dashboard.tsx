@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { measurements, money, statuses, whatsapp } from "@/lib/catalog";
 import type { DashboardData } from "@/lib/seller";
-import { action, message, useClock, usePolling } from "./client";
+import { action, message, RequestError, useClock, usePolling } from "./client";
 import { Footer, Header, Notice, Sheet, Stage } from "./common";
 import { QuickList, StoreSettings } from "./seller-forms";
 import { ShareStorefront } from "./share-storefront";
@@ -77,10 +77,16 @@ type Order = DashboardData["orders"][number];
 
 export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; publicOrigin?: string }) {
   const router = useRouter();
-  const get = useCallback((signal?: AbortSignal) => action<DashboardData>("dashboard", {}, signal), []);
+  const get = useCallback(async (signal?: AbortSignal) => {
+    try { return await action<DashboardData>("dashboard", {}, signal); }
+    catch (error) {
+      if (error instanceof RequestError && (error.status === 401 || error.status === 404)) router.refresh();
+      throw error;
+    }
+  }, [router]);
   const [data, setData] = usePolling(initial, get, 5000);
   const now = useClock(data.serverTime);
-  const [tab, setTab] = useState<typeof tabs[number]["key"]>("receipts");
+  const [selectedTab, setTab] = useState<typeof tabs[number]["key"]>("receipts");
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [listing, setListing] = useState(false);
@@ -98,6 +104,14 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
     } catch { setError("The dashboard could not refresh. Try reloading the page."); }
   }, [get, setData]);
   const { seller, items } = data;
+  const held = seller.status === "HELD";
+  const tab = held && selectedTab === "settings" ? "inventory" : selectedTab;
+  useEffect(() => {
+    if (!held) return;
+    setListing(false);
+    setDecision(null);
+    setDeleting(null);
+  }, [held]);
   const pending = data.orders.filter(order => order.paymentStatus === "PENDING_VERIFICATION");
   const groups = new Map<string, Order[]>();
   for (const order of data.orders.filter(entry => entry.paymentStatus === "VERIFIED_PAID")) {
@@ -123,20 +137,23 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
   }
 
   return <>
-    <Header storeSlug={seller.storeSlug} seller />
+    <Header storeSlug={held ? undefined : seller.storeSlug} seller />
     <main className="wrap dashboard">
       <div className="dash-top section-intro">
         <div><span className="eyebrow"><ShieldCheck size={16} strokeWidth={1.5} /> @{seller.storeSlug}</span><h1>Seller dashboard</h1><p>{seller.storeName}</p></div>
-        <div className="button-row"><Link className="button" href={`/${seller.storeSlug}`}><ExternalLink size={17} strokeWidth={1.5} /> Storefront</Link>
+        <div className="button-row">{!held && <>
+          <Link className="button" href={`/${seller.storeSlug}`}><ExternalLink size={17} strokeWidth={1.5} /> Storefront</Link>
           <button className="button primary" onClick={() => setListing(true)}><Plus size={20} strokeWidth={1.5} /> Quick list</button>
+        </>}
           <button className="icon-button" aria-label="Sign out" onClick={async () => {
             try { await action("logout"); router.refresh(); } catch (exception) { setError(message(exception)); }
           }}><LogOut size={18} strokeWidth={1.5} /></button>
         </div>
       </div>
-      <ShareStorefront key={seller.storeSlug} storeSlug={seller.storeSlug} publicOrigin={publicOrigin} />
+      {held ? <Notice><span><strong>Your shop is on hold.</strong> Buyers cannot see it. Your dashboard is read-only until an admin restores access.</span></Notice> :
+        <ShareStorefront key={seller.storeSlug} storeSlug={seller.storeSlug} publicOrigin={publicOrigin} />}
       <nav className="dashboard-tabs" aria-label="Seller sections">
-        {tabs.map(({ key, label, icon: Icon }) => <button key={key} aria-current={tab === key ? "page" : undefined} className={tab === key ? "selected" : ""}
+        {tabs.filter(({ key }) => !held || key !== "settings").map(({ key, label, icon: Icon }) => <button key={key} aria-current={tab === key ? "page" : undefined} className={tab === key ? "selected" : ""}
           onClick={() => { setTab(key); setError(""); setSuccess(""); }}><Icon size={17} strokeWidth={1.5} /> {label}
           {key === "receipts" && pending.length > 0 && <span>{pending.length}</span>}
         </button>)}
@@ -158,20 +175,24 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
               <img src={`/api/receipt/${order.id}`} alt="Payment receipt screenshot" loading="lazy" />
             </button>
           </details>}
-          <div className="order-actions">
+          {!held && <div className="order-actions">
             <button className="button reject" onClick={() => setDecision({ type: "review", orderId: order.id, paid: false, code: order.garment.code })}><X size={17} strokeWidth={1.5} /> Reject / Unpaid</button>
             <button className="button primary" onClick={() => setDecision({ type: "review", orderId: order.id, paid: true, code: order.garment.code })}><Check size={18} strokeWidth={1.5} /> Confirm Paid</button>
-          </div>
+          </div>}
         </article>)}
       </section>}
       {tab === "inventory" && <section className="dash-section stack">
         <div className="section-heading"><div><h2>Live inventory</h2><p className="muted">Track one-of-one pieces and their current locks.</p></div><span className="piece-count">{visible.length} pieces</span></div>
         <div className="surface inventory-filters"><label>Search inventory<input value={query} onChange={event => setQuery(event.target.value)} placeholder="Item name or code" /></label>
           <label>Status<select value={filter} onChange={event => setFilter(event.target.value)}><option value="all">All statuses</option>{Object.entries(statuses).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></div>
-        <div className="surface inventory-list">{visible.map(item => <div className="inventory-row" key={item.id}><Link href={`/item/${item.id}`} className="inventory-item">
-          <img src={item.images[0]} alt="" /><div><span className="eyebrow">{item.code}</span><strong>{item.title}</strong><small>{measurements(item)}</small></div><div><strong>{money(item.price)}</strong><Stage item={item} now={now} /></div>
-        </Link><button type="button" className="icon-button inventory-delete" aria-label={`Delete ${item.code} ${item.title}`}
-          onClick={() => setDeleting({ id: item.id, code: item.code, title: item.title })}><Trash2 size={18} strokeWidth={1.5} /></button></div>)}{visible.length === 0 && <p className="empty">No pieces match this filter.</p>}</div>
+        <div className="surface inventory-list">{visible.map(item => {
+          const details = <><img src={item.images[0]} alt="" /><div><span className="eyebrow">{item.code}</span><strong>{item.title}</strong><small>{measurements(item)}</small></div><div><strong>{money(item.price)}</strong><Stage item={item} now={now} /></div></>;
+          return <div className="inventory-row" key={item.id}>{held ? <div className="inventory-item">{details}</div> : <>
+            <Link href={`/item/${item.id}`} className="inventory-item">{details}</Link>
+            <button type="button" className="icon-button inventory-delete" aria-label={`Delete ${item.code} ${item.title}`}
+              onClick={() => setDeleting({ id: item.id, code: item.code, title: item.title })}><Trash2 size={18} strokeWidth={1.5} /></button>
+          </>}</div>;
+        })}{visible.length === 0 && <p className="empty">No pieces match this filter.</p>}</div>
       </section>}
       {tab === "hold" && <section className="dash-section stack">
         <div className="section-heading"><div><h2>Hold Box fulfillment</h2><p className="muted">Pack verified pieces together by buyer.</p></div><span className="piece-count">{groups.size} buyers</span></div>
@@ -186,7 +207,7 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
             <div className="inventory-list">{orders.map(order => <div className="inventory-item" key={order.id}>
               <img src={order.garment.images[0]} alt="" /><div><span className="eyebrow">{order.garment.code}</span><strong>{order.garment.title}</strong></div><strong>{money(order.totalAmount)}</strong>
             </div>)}</div>
-            <button className="button primary" onClick={() => setDecision({ type: "ship", ids: orders.map(order => order.id), buyer: first.buyerName })}><PackageCheck size={18} strokeWidth={1.5} /> Mark parcel shipped</button>
+            {!held && <button className="button primary" onClick={() => setDecision({ type: "ship", ids: orders.map(order => order.id), buyer: first.buyerName })}><PackageCheck size={18} strokeWidth={1.5} /> Mark parcel shipped</button>}
           </article>;
         })}
       </section>}
@@ -195,10 +216,10 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
       </section>}
     </main>
     <Footer storeName={seller.storeName} />
-    {listing && <QuickList data={data} onClose={() => setListing(false)} onListed={async code => {
+    {!held && listing && <QuickList data={data} onClose={() => setListing(false)} onListed={async code => {
       setListing(false); setTab("inventory"); setFilter("all"); setQuery(""); setError(""); setSuccess(`${code} was listed.`); await refresh();
     }} />}
-    {deleting && <Sheet title="Delete listing?" onClose={() => { if (!busy) setDeleting(null); }}>
+    {!held && deleting && <Sheet title="Delete listing?" onClose={() => { if (!busy) setDeleting(null); }}>
       <div className="stack"><p>Delete {deleting.code} · {deleting.title}? This permanently removes the listing from your store.</p>
         <p className="muted">Listings with an active lock or an associated order cannot be deleted.</p>
         <div className="button-row"><button className="button" disabled={busy} onClick={() => setDeleting(null)}>Cancel</button>
@@ -212,7 +233,7 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
           }}>{busy ? "Deleting…" : "Delete listing"}</button></div>
       </div>
     </Sheet>}
-    {decision && <Sheet title={decision.type === "ship" ? "Mark parcel shipped?" : decision.paid ? "Confirm payment?" : "Reject this receipt?"} onClose={() => { if (!busy) setDecision(null); }}>
+    {!held && decision && <Sheet title={decision.type === "ship" ? "Mark parcel shipped?" : decision.paid ? "Confirm payment?" : "Reject this receipt?"} onClose={() => { if (!busy) setDecision(null); }}>
       <div className="stack"><p>{decision.type === "ship" ? `Mark ${decision.ids.length} ${decision.ids.length === 1 ? "piece" : "pieces"} shipped for ${decision.buyer}.` : decision.paid ? `Confirm the DuitNow transfer for ${decision.code}.` : `${decision.code} will be available for another buyer immediately.`}</p>
         <div className="button-row"><button className="button" disabled={busy} onClick={() => setDecision(null)}>Cancel</button><button className="button primary" disabled={busy} onClick={confirm}>{busy ? "Saving…" : decision.type === "ship" ? "Mark shipped" : decision.paid ? "Confirm Paid" : "Reject / Unpaid"}</button></div></div>
     </Sheet>}

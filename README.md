@@ -41,3 +41,11 @@ The offline shell explains how to reconnect. Availability and payments require a
 New sellers can create a shop from `/dashboard` using their shop name, handle, WhatsApp number and a password of at least 12 characters. After signing in, they must upload their DuitNow QR and fill in the account and bank details in Settings before buyers can reserve items.
 
 Sellers are prompted to save their credentials in a password manager before creating a shop. The app has no self-service password reset.
+
+## Admin dashboard
+
+Set `ADMIN_PASSWORD` to a unique password of 12 to 256 characters in your private `.env` for local development. In Vercel, add `ADMIN_PASSWORD` under Project Settings → Environment Variables, paste the password directly as the value without surrounding quotation marks, and redeploy. Keep `ADMIN_PASSWORD` blank in `.env.example`. Admin sign-in also uses the existing `SESSION_SECRET`.
+
+Restart the local server and open `/admin/dashboard`. Sign in to see platform totals and manage shops. Admin sessions expire after eight hours. Changing `ADMIN_PASSWORD` invalidates existing admin sessions once the new setting takes effect.
+
+Run `npm run db:migrate` on the target database before deploying shop moderation. In **Manage shops**, use **Hold** to hide a storefront and its listings and make the seller dashboard read-only. **Resume** restores access. **Delete** permanently removes the storefront from the app and disables seller sign-in. The database keeps the shop's order history and reserves its handle. Hold and Delete are both blocked while any buyer garment lock is active.

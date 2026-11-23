@@ -29,6 +29,15 @@ function decrypt(data: Buffer) {
   return Buffer.concat([cipher.update(data.subarray(28)), cipher.final()]);
 }
 
+async function removeFile(name: string, pattern: RegExp) {
+  if (!pattern.test(name)) return;
+  if (useBlob()) {
+    await del(`lockdulu/${name}`).catch(error => console.error(error));
+  } else {
+    await unlink(path.join(root, name)).catch(error => console.error(error));
+  }
+}
+
 export const storage = {
   async save(file: File, kind: "garment" | "qr" | "receipt") {
     if (file.size > maxUpload || !file.size) throw new HttpError("Choose an image under 10 MB.", 413);
@@ -58,12 +67,10 @@ export const storage = {
     return { name, url: sealed ? name : `/api/media/${name}` };
   },
   async removeReceipt(name: string) {
-    if (!receiptName.test(name)) return;
-    if (useBlob()) {
-      await del(`lockdulu/${name}`).catch(error => console.error(error));
-    } else {
-      await unlink(path.join(root, name)).catch(error => console.error(error));
-    }
+    await removeFile(name, receiptName);
+  },
+  async removeImage(name: string) {
+    await removeFile(name, imageName);
   },
   async read(name: string, sealed = false) {
     if (!(sealed ? receiptName : imageName).test(name)) throw new HttpError("Image not found.", 404);

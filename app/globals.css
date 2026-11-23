@@ -249,6 +249,30 @@ input[type="radio"],input[type="checkbox"] { accent-color: var(--olive); }
 .section-intro p { color: var(--muted-readable); }
 .lookup, .settings-form { padding: 1rem; }
 .lookup { max-width: 520px; margin-bottom: .9rem; }
+.admin-password-field { gap: .32rem; }
+.admin-password-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; }
+.admin-password-row .button { white-space: nowrap; }
+.admin-password-row input::-ms-reveal { display: none; }
+.admin-heading { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: .75rem; margin-bottom: 1rem; }
+.admin-heading .section-intro { margin: 0; }
+.admin-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: .75rem; margin-block: 0 1rem; }
+.admin-metric { display: grid; align-content: space-between; gap: .65rem; min-height: 112px; padding: .9rem 1rem; }
+.admin-metric dt, .admin-shops h2 { display: flex; align-items: center; gap: .45rem; }
+.admin-metric dt { color: var(--muted-readable); font-size: .87rem; font-weight: 650; }
+.admin-metric dd { margin: 0; font-size: 2rem; font-weight: 750; line-height: 1.1; }
+.admin-shops { padding: 1rem; }
+.admin-shops h2 { margin-bottom: .9rem; font-size: 1.35rem; }
+.admin-table-scroll { overflow-x: auto; }
+.admin-shops table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+.admin-shops th, .admin-shops td { text-align: left; padding: .65rem .5rem; border-bottom: 1px solid var(--border); }
+.admin-shops thead th { background: var(--soft); color: var(--muted-readable); }
+.admin-shops td { white-space: nowrap; }
+.admin-shops tbody th { min-width: 9rem; overflow-wrap: anywhere; }
+.admin-shops tbody a:hover { text-decoration: underline; }
+.admin-shops tbody a svg { display: inline; vertical-align: text-bottom; }
+.admin-shops tbody th .muted { display: block; font-size: .78rem; font-weight: 450; }
+.admin-shop-actions, .admin-pagination { display: flex; align-items: center; gap: .45rem; }
+.admin-pagination { justify-content: end; margin-top: .75rem; }
 .locker-results { margin-top: 1rem; }
 .locker-order { display: grid; grid-template-columns: 69px minmax(0, 1fr); gap: .7rem; padding: .75rem; }
 .locker-order img { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; border-radius: 6px; }

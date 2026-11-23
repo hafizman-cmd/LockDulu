@@ -1,8 +1,9 @@
 import type { Drop, Garment, Order, Prisma } from "@/generated/prisma/client";
-import { db, writeTransaction } from "./db";
+import { db, writeTransaction } from "./db.ts";
 import type { GarmentView, Pin, Quote } from "./catalog";
-import { HttpError } from "./http";
-import { hashToken } from "./security";
+import { HttpError } from "./http.ts";
+import { hashToken } from "./security.ts";
+import { activeShop, requireActiveSeller } from "./shop-status.ts";
 import type { z } from "zod";
 import type { delivery } from "./validation";
 
@@ -18,7 +19,7 @@ async function closeAbandonedOrders(tx: Prisma.TransactionClient, garmentIds: st
 }
 
 export async function releaseExpired(scope: { sellerId: string } | { id: string }) {
-  const where = { ...scope, status: "LOCKED" as const, lockedUntil: { lte: new Date() } };
+  const where = { ...scope, seller: activeShop, status: "LOCKED" as const, lockedUntil: { lte: new Date() } };
   if (!await db().garment.findFirst({ where, select: { id: true } })) return;
   await writeTransaction(async tx => {
     const released = await tx.garment.updateManyAndReturn({
@@ -31,7 +32,7 @@ export async function releaseExpired(scope: { sellerId: string } | { id: string 
 }
 
 export async function openDueDrops(sellerId: string) {
-  const where = { sellerId, status: "UPCOMING" as const, scheduledAt: { lte: new Date() } };
+  const where = { sellerId, seller: activeShop, status: "UPCOMING" as const, scheduledAt: { lte: new Date() } };
   if (!await db().drop.findFirst({ where, select: { id: true } })) return;
   await writeTransaction(tx => tx.drop.updateMany({
     where,
@@ -58,10 +59,11 @@ export const storeSelect = { storeName: true, storeSlug: true, bio: true, whatsa
 
 export async function readStore(slug: string) {
   const storeSlug = slug.toLowerCase();
+  const activeStore = { storeSlug, ...activeShop };
   const [seller, initialItems, initialDrops] = await Promise.all([
-    db().seller.findUnique({ where: { storeSlug }, select: { ...storeSelect, id: true } }),
-    db().garment.findMany({ where: { seller: { storeSlug } }, include: { drop: true }, orderBy: { code: "asc" } }),
-    db().drop.findMany({ where: { seller: { storeSlug }, status: { not: "ENDED" } }, orderBy: { scheduledAt: "asc" } }),
+    db().seller.findUnique({ where: activeStore, select: { ...storeSelect, id: true } }),
+    db().garment.findMany({ where: { seller: activeStore }, include: { drop: true }, orderBy: { code: "asc" } }),
+    db().drop.findMany({ where: { seller: activeStore, status: { not: "ENDED" } }, orderBy: { scheduledAt: "asc" } }),
   ]);
   if (!seller) return null;
   const now = Date.now();
@@ -75,8 +77,8 @@ export async function readStore(slug: string) {
       hasDueDrops && openDueDrops(seller.id),
     ]);
     [items, drops] = await Promise.all([
-      db().garment.findMany({ where: { sellerId: seller.id }, include: { drop: true }, orderBy: { code: "asc" } }),
-      db().drop.findMany({ where: { sellerId: seller.id, status: { not: "ENDED" } }, orderBy: { scheduledAt: "asc" } }),
+      db().garment.findMany({ where: { sellerId: seller.id, seller: activeShop }, include: { drop: true }, orderBy: { code: "asc" } }),
+      db().drop.findMany({ where: { sellerId: seller.id, seller: activeShop, status: { not: "ENDED" } }, orderBy: { scheduledAt: "asc" } }),
     ]);
   }
   const { id: _sellerId, ...store } = seller;
@@ -84,7 +86,9 @@ export async function readStore(slug: string) {
 }
 
 export async function readItem(id: string) {
-  let item = await db().garment.findUnique({ where: { id }, include: { drop: true, seller: { select: storeSelect } } });
+  const where = { id, seller: activeShop };
+  const include = { drop: true, seller: { select: storeSelect } } as const;
+  let item = await db().garment.findUnique({ where, include });
   if (!item) return null;
   const now = Date.now();
   const hasExpiredLock = item.status === "LOCKED" && item.lockedUntil && item.lockedUntil.getTime() <= now;
@@ -94,7 +98,7 @@ export async function readItem(id: string) {
       hasExpiredLock && releaseExpired({ id }),
       hasDueDrop && openDueDrops(item.sellerId),
     ]);
-    item = await db().garment.findUnique({ where: { id }, include: { drop: true, seller: { select: storeSelect } } });
+    item = await db().garment.findUnique({ where, include });
   }
   return item && { item: garmentView(item), store: item.seller, serverTime: Date.now() };
 }
@@ -109,14 +113,14 @@ function quote(order: Order, lockedUntil: Date): Quote {
 
 export async function lockItem(id: string, token: string) {
   const hash = hashToken(token);
-  const item = await db().garment.findUnique({ where: { id }, select: { sellerId: true } });
+  const item = await db().garment.findUnique({ where: { id, seller: activeShop }, select: { sellerId: true } });
   if (!item) throw new HttpError("This garment could not be found.", 404);
   await openDueDrops(item.sellerId);
   return writeTransaction(async tx => {
     const now = new Date();
     const lockedUntil = new Date(now.getTime() + 600_000);
     const updated = await tx.garment.updateMany({
-      where: { id, AND: [
+      where: { id, seller: activeShop, AND: [
         { OR: [{ dropId: null }, { drop: { status: "LIVE" } }] },
         { OR: [{ status: "AVAILABLE" }, { status: "LOCKED", lockedUntil: { lte: now } }] },
       ] },
@@ -124,7 +128,7 @@ export async function lockItem(id: string, token: string) {
     });
     if (!updated.count) {
       const existing = await tx.garment.findFirst({
-        where: { id, status: "LOCKED", lockSessionToken: hash, lockedUntil: { gt: new Date() } },
+        where: { id, seller: activeShop, status: "LOCKED", lockSessionToken: hash, lockedUntil: { gt: new Date() } },
         include: { orderItem: { include: { order: true } } },
       });
       if (existing?.lockedUntil && existing.orderItem) return { quote: quote(existing.orderItem.order, existing.lockedUntil), serverTime: Date.now() };
@@ -149,7 +153,7 @@ export async function lockItem(id: string, token: string) {
 
 export async function orderState(orderId: string, token: string) {
   const order = await db().order.findUnique({
-    where: { id: orderId, buyerAccessHash: hashToken(token) },
+    where: { id: orderId, buyerAccessHash: hashToken(token), seller: activeShop },
     include: { items: { include: { garment: true } } },
   });
   if (!order) throw new HttpError("This checkout could not be found.", 404);
@@ -167,12 +171,12 @@ export async function orderState(orderId: string, token: string) {
 export async function submitReceipt(orderId: string, token: string, details: z.infer<typeof delivery>, receiptImageUrl: string) {
   return writeTransaction(async tx => {
     const hash = hashToken(token);
-    const order = await tx.order.findUnique({ where: { id: orderId, buyerAccessHash: hash }, include: { items: true } });
+    const order = await tx.order.findUnique({ where: { id: orderId, buyerAccessHash: hash, seller: activeShop }, include: { items: true } });
     if (!order) throw new HttpError("This checkout could not be found.", 404);
     const garmentId = order.items[0]?.garmentId;
     if (!garmentId) throw new HttpError("Your lock has expired.", 409);
     const changed = await tx.garment.updateMany({
-      where: { id: garmentId, status: "LOCKED", lockSessionToken: hash, lockedUntil: { gt: new Date() } },
+      where: { id: garmentId, seller: activeShop, status: "LOCKED", lockSessionToken: hash, lockedUntil: { gt: new Date() } },
       data: { status: "PENDING_VERIFICATION", lockSessionToken: null, lockedUntil: null },
     });
     if (!changed.count) {
@@ -192,6 +196,7 @@ export async function submitReceipt(orderId: string, token: string, details: z.i
 
 export async function reviewOrder(sellerId: string, orderId: string, paid: boolean) {
   return writeTransaction(async tx => {
+    await requireActiveSeller(tx, sellerId);
     const order = await tx.order.findUnique({
       where: { id: orderId, sellerId, paymentStatus: "PENDING_VERIFICATION" }, include: { items: true },
     });

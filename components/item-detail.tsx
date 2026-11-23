@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ChevronLeft, ChevronRight, Clock3, Copy, Download, ImagePlus, LockKeyhole, MessageCircle, Package, Ruler, ShieldCheck, Truck,
 } from "lucide-react";
@@ -68,7 +69,14 @@ function Schematic({ item }: { item: GarmentView }) {
 
 export function ItemDetail({ initial }: { initial: ItemData }) {
   const { id } = initial.item;
-  const get = useCallback((signal?: AbortSignal) => json<ItemData>(`/api/item/${id}`, { signal }), [id]);
+  const router = useRouter();
+  const get = useCallback(async (signal?: AbortSignal) => {
+    try { return await json<ItemData>(`/api/item/${id}`, { signal }); }
+    catch (error) {
+      if (error instanceof RequestError && error.status === 404) router.refresh();
+      throw error;
+    }
+  }, [id, router]);
   const [data, setData] = usePolling(initial, get);
   const [lockTime, setLockTime] = useState(0);
   const now = useClock(Math.max(lockTime, data.serverTime));

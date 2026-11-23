@@ -1,7 +1,12 @@
 import { ZodError } from "zod";
 
 export class HttpError extends Error {
-  constructor(message: string, public status = 400) { super(message); }
+  constructor(message: string, status = 400) {
+    super(message);
+    this.status = status;
+  }
+
+  status: number;
 }
 
 export async function respond(handler: () => Promise<Response | object>) {

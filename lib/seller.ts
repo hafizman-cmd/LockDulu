@@ -1,7 +1,8 @@
-import { db, writeTransaction } from "./db";
-import { HttpError } from "./http";
-import { garmentImages, garmentView, openDueDrops, releaseExpired } from "./inventory";
-import { hashToken } from "./security";
+import { db, writeTransaction } from "./db.ts";
+import { HttpError } from "./http.ts";
+import { garmentImages, garmentView, openDueDrops, releaseExpired } from "./inventory.ts";
+import { hashToken } from "./security.ts";
+import { activeShop, existingShop, requireActiveSeller } from "./shop-status.ts";
 import type { z } from "zod";
 import type { listing, settings } from "./validation";
 
@@ -9,12 +10,12 @@ const orderInclude = { items: { include: { garment: { include: { drop: true } } 
 
 export async function dashboardData(sellerId: string) {
   const seller = await db().seller.findUnique({
-    where: { id: sellerId },
+    where: { id: sellerId, ...existingShop },
     select: { storeName: true, storeSlug: true, qrCodeUrl: true, qrAccountName: true, qrBankLabel: true,
-      shippingFee: true, holdBoxDays: true, nextItemNumber: true },
+      shippingFee: true, holdBoxDays: true, nextItemNumber: true, status: true },
   });
   if (!seller) return null;
-  await Promise.all([releaseExpired({ sellerId }), openDueDrops(sellerId)]);
+  if (seller.status === "ACTIVE") await Promise.all([releaseExpired({ sellerId }), openDueDrops(sellerId)]);
   const [items, orders, drops] = await Promise.all([
     db().garment.findMany({ where: { sellerId }, include: { drop: true }, orderBy: { code: "asc" } }),
     db().order.findMany({
@@ -46,6 +47,7 @@ export type DashboardData = NonNullable<Awaited<ReturnType<typeof dashboardData>
 
 export async function listGarment(sellerId: string, data: z.infer<typeof listing>, dropId: string | null) {
   return writeTransaction(async tx => {
+    await requireActiveSeller(tx, sellerId);
     if (dropId && !await tx.drop.findFirst({ where: { id: dropId, sellerId, status: { not: "ENDED" } } })) {
       throw new HttpError("Select an active or upcoming drop.", 409);
     }
@@ -61,6 +63,7 @@ export async function listGarment(sellerId: string, data: z.infer<typeof listing
 export async function deleteGarment(sellerId: string, garmentId: string) {
   await releaseExpired({ sellerId });
   return writeTransaction(async tx => {
+    await requireActiveSeller(tx, sellerId);
     const deleted = await tx.garment.deleteMany({
       where: { id: garmentId, sellerId, status: "AVAILABLE", orderItem: null },
     });
@@ -72,12 +75,16 @@ export async function deleteGarment(sellerId: string, garmentId: string) {
 }
 
 export async function updateSettings(sellerId: string, data: z.infer<typeof settings>) {
-  await db().seller.update({ where: { id: sellerId }, data });
-  return { ok: true };
+  return writeTransaction(async tx => {
+    await requireActiveSeller(tx, sellerId);
+    await tx.seller.update({ where: { id: sellerId }, data });
+    return { ok: true };
+  });
 }
 
 export async function markShipped(sellerId: string, orderIds: string[]) {
   return writeTransaction(async tx => {
+    await requireActiveSeller(tx, sellerId);
     const orders = await tx.order.findMany({
       where: { sellerId, id: { in: orderIds }, paymentStatus: "VERIFIED_PAID", fulfillmentType: "HOLD_BOX", shippedAt: null },
       include: { items: true },
@@ -98,7 +105,7 @@ export async function markShipped(sellerId: string, orderIds: string[]) {
 export async function lockerLookup(phone: string, tokens: string[]) {
   const orders = await db().order.findMany({
     where: {
-      buyerPhone: phone, buyerAccessHash: { in: tokens.map(hashToken) },
+      buyerPhone: phone, buyerAccessHash: { in: tokens.map(hashToken) }, seller: activeShop,
       OR: [{ paymentStatus: "PENDING_VERIFICATION" }, { paymentStatus: "VERIFIED_PAID", fulfillmentType: "HOLD_BOX", shippedAt: null }],
     },
     include: { ...orderInclude, seller: { select: { storeName: true, whatsappNumber: true } } },
@@ -120,15 +127,17 @@ export async function lockerLookup(phone: string, tokens: string[]) {
 export type LockerOrder = Awaited<ReturnType<typeof lockerLookup>>[number];
 
 export async function requestDispatch(phone: string, token: string) {
-  const order = await db().order.findUnique({
-    where: { buyerAccessHash: hashToken(token), buyerPhone: phone, paymentStatus: "VERIFIED_PAID", fulfillmentType: "HOLD_BOX", shippedAt: null },
-    select: { id: true, sellerId: true, seller: { select: { whatsappNumber: true } } },
+  return writeTransaction(async tx => {
+    const openParcel = { buyerPhone: phone, paymentStatus: "VERIFIED_PAID", fulfillmentType: "HOLD_BOX", shippedAt: null, seller: activeShop } as const;
+    const order = await tx.order.findUnique({
+      where: { buyerAccessHash: hashToken(token), ...openParcel },
+      select: { id: true, sellerId: true, seller: { select: { whatsappNumber: true } } },
+    });
+    if (!order) throw new HttpError("This Hold Box order is no longer available for dispatch.", 409);
+    await tx.order.updateMany({
+      where: { sellerId: order.sellerId, ...openParcel, dispatchRequestedAt: null },
+      data: { dispatchRequestedAt: new Date() },
+    });
+    return { orderId: order.id, sellerPhone: order.seller.whatsappNumber };
   });
-  if (!order) throw new HttpError("This Hold Box order is no longer available for dispatch.", 409);
-  await db().order.updateMany({
-    where: { sellerId: order.sellerId, buyerPhone: phone, paymentStatus: "VERIFIED_PAID", fulfillmentType: "HOLD_BOX",
-      shippedAt: null, dispatchRequestedAt: null },
-    data: { dispatchRequestedAt: new Date() },
-  });
-  return { orderId: order.id, sellerPhone: order.seller.whatsappNumber };
 }
