@@ -1,7 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Minus, Plus, QrCode, Trash2 } from "lucide-react";
 import { categories, grades, type Pin } from "@/lib/catalog";
+import { garmentBackgrounds, makeGarmentPhoto, prepareGarmentCutout, type GarmentBackground } from "@/lib/garment-background";
 import type { DashboardData } from "@/lib/seller";
 import { action, message, upload } from "./client";
 import { Notice, Sheet } from "./common";
@@ -11,6 +12,11 @@ async function sendImage(file: File, kind: "garment" | "qr") {
   form.set("file", file);
   return (await upload<{ url: string }>(kind, form)).url;
 }
+
+type FrontCutout = {
+  source: string;
+  image: { canvas: HTMLCanvasElement; preview: string } | null;
+};
 
 function Stepper({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   const update = (amount: number) => onChange(String(Math.min(100, Math.max(5, (Number(value) || 0) + amount))));
@@ -24,6 +30,9 @@ function Stepper({ label, value, onChange }: { label: string; value: string; onC
 export function QuickList({ data, onClose, onListed }: { data: DashboardData; onClose: () => void; onListed: (code: string) => Promise<void> }) {
   const [grade, setGrade] = useState<keyof typeof grades>("VINTAGE_FADE");
   const [photos, setPhotos] = useState<(string | null)[]>([null, null, null]);
+  const [background, setBackground] = useState<GarmentBackground>("White");
+  const [cutout, setCutout] = useState<FrontCutout | null>(null);
+  const savedFront = useRef<{ source: string; background: GarmentBackground; url: string } | null>(null);
   const [uploading, setUploading] = useState(0);
   const [pins, setPins] = useState<Pin[]>([]);
   const [activePin, setActivePin] = useState<number | null>(null);
@@ -33,12 +42,41 @@ export function QuickList({ data, onClose, onListed }: { data: DashboardData; on
   const [category, setCategory] = useState<string>("Tee");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const front = photos[0];
+  const frontCutout = cutout?.source === front ? cutout : null;
+  const preparing = Boolean(front && !frontCutout);
+  const useOriginal = background === "Original" || frontCutout?.image === null;
+  const color = useOriginal ? undefined : garmentBackgrounds[background];
+  const preview = color ? frontCutout?.image?.preview ?? front : front;
+  const previewColor = frontCutout?.image ? color : undefined;
+
+  useEffect(() => {
+    if (!front) return;
+    const controller = new AbortController();
+    let previewUrl: string | undefined;
+    prepareGarmentCutout(front, controller.signal).then(({ canvas, preview }) => {
+      if (controller.signal.aborted) return;
+      previewUrl = URL.createObjectURL(preview);
+      setCutout({ source: front, image: { canvas, preview: previewUrl } });
+    }).catch(() => {
+      if (!controller.signal.aborted) setCutout({ source: front, image: null });
+    });
+    return () => {
+      controller.abort();
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [front]);
 
   async function attach(file: File, index: number) {
     setUploading(count => count + 1); setError("");
     try {
       const url = await sendImage(file, "garment");
       setPhotos(current => current.map((photo, i) => i === index ? url : photo));
+      if (index === 0) {
+        setBackground("White");
+        setCutout(null);
+        savedFront.current = null;
+      }
       if (index < 2) {
         const photo = index === 0 ? "front" : "back";
         setPins(current => current.filter(pin => (pin.photo ?? "front") !== photo));
@@ -50,21 +88,33 @@ export function QuickList({ data, onClose, onListed }: { data: DashboardData; on
 
   return <Sheet title="Quick list a garment" onClose={() => { if (!busy) onClose(); }}>
     <form className="stack" onSubmit={async event => {
-      event.preventDefault(); setError("");
-      if (!photos[0] || (photos[2] && !photos[1])) { setError("Upload a front photo first. Add a back photo before the tag photo."); return; }
+      event.preventDefault();
+      if (busy || uploading || (preparing && !useOriginal)) return;
+      setError("");
+      if (!front || (photos[2] && !photos[1])) { setError("Upload a front photo first. Add a back photo before the tag photo."); return; }
       if (pins.some(pin => !pin.note.trim())) { setError("Add a note to each flaw pin or remove it."); return; }
       const fields = new FormData(event.currentTarget);
       setBusy(true);
       try {
-        const result = await action<{ code: string }>("list", {
+        let frontUrl = front;
+        if (color && frontCutout?.image) {
+          const saved = savedFront.current;
+          if (saved?.source === front && saved.background === background) {
+            frontUrl = saved.url;
+          } else {
+            frontUrl = await sendImage(await makeGarmentPhoto(frontCutout.image.canvas, color), "garment");
+            savedFront.current = { source: front, background, url: frontUrl };
+          }
+        }
+        const listed = await action<{ code: string }>("list", {
           dropId: fields.get("dropId") || null,
           listing: { title: fields.get("title"), brand: fields.get("brand"), price: fields.get("price"),
             category: fields.get("category"), conditionNotes: fields.get("conditionNotes"),
             pitInches: Number(pit), lengthInches: Number(length), conditionGrade: grade,
-            images: photos.filter(Boolean), flawPins: pins,
+            images: [frontUrl, ...photos.slice(1).filter(Boolean)], flawPins: pins,
           },
         });
-        await onListed(result.code);
+        await onListed(listed.code);
       } catch (exception) { setError(message(exception)); } finally { setBusy(false); }
     }}>
       <div className="order-ref"><span>Next item code</span><strong>B-{String(data.seller.nextItemNumber).padStart(3, "0")}</strong></div>
@@ -77,12 +127,28 @@ export function QuickList({ data, onClose, onListed }: { data: DashboardData; on
       <label>Condition notes<textarea name="conditionNotes" maxLength={1000} rows={2} /></label>
       <fieldset><legend>Photos</legend><div className="photo-fields">
         {["Front", "Back", "Tag"].map((label, i) => <label className="file-field" key={label}>
-          {photos[i] ? <img src={photos[i]} alt="" /> : <ImagePlus size={21} strokeWidth={1.5} />}
+          {photos[i] ? <img src={(i === 0 ? preview : photos[i])!} alt="" style={i === 0 ? { backgroundColor: previewColor } : undefined} /> : <ImagePlus size={21} strokeWidth={1.5} />}
           <span>{label}</span><input type="file" aria-label={`${label} photo`} accept="image/*" disabled={busy || uploading > 0} onChange={event => {
             const file = event.target.files?.[0]; event.target.value = ""; if (file) void attach(file, i);
           }} />
         </label>)}
       </div></fieldset>
+      {front && preview && <fieldset className="front-background" disabled={busy || uploading > 0}>
+        <legend>Front photo background</legend>
+        <div className="grade-pills">
+          {(Object.keys(garmentBackgrounds) as GarmentBackground[]).map(option => {
+            const selected = option === (useOriginal ? "Original" : background);
+            return <button type="button" key={option} aria-pressed={selected} className={selected ? "selected" : ""}
+              disabled={option !== "Original" && frontCutout?.image === null} onClick={() => setBackground(option)}>{option}</button>;
+          })}
+        </div>
+        <div role="status" className="muted">
+          {preparing ? "Preparing the cutout. You can use Original now."
+            : frontCutout?.image === null ? "Background removal was unavailable. You can use Original or try another front photo."
+              : "Check that the garment and any flaws are visible. Photos of the garment on its own work best."}
+        </div>
+        <img className="front-background-preview" src={preview} alt="Front photo preview" style={{ backgroundColor: previewColor }} />
+      </fieldset>}
       {(photos[0] || photos[1]) && <fieldset className="pin-editor">
         <legend>Flaw pins</legend><p className="muted">Tap the image to mark a flaw and describe it below.</p>
         <div className="grade-pills" aria-label="Photo to mark">
@@ -99,7 +165,8 @@ export function QuickList({ data, onClose, onListed }: { data: DashboardData; on
             const x = event.detail ? clamp((event.clientX - bounds.left) / bounds.width * 100) : 50;
             const y = event.detail ? clamp((event.clientY - bounds.top) / bounds.height * 100) : 50;
             setPins([...pins, { x, y, note: "", photo: pinPhoto }]); setActivePin(pins.length);
-          }}><img src={photos[pinPhoto === "front" ? 0 : 1]!} alt={`${pinPhoto === "front" ? "Front" : "Back"} garment photo for marking flaws`} /></button>
+          }}><img src={(pinPhoto === "front" ? preview : photos[1])!} style={pinPhoto === "front" ? { backgroundColor: previewColor } : undefined}
+            alt={`${pinPhoto === "front" ? "Front" : "Back"} garment photo for marking flaws`} /></button>
           {pins.map((pin, i) => (pin.photo ?? "front") === pinPhoto && <button type="button" key={i} className="flaw-pin" aria-label={`Edit flaw ${i + 1}`} aria-pressed={activePin === i} style={{ left: `${pin.x}%`, top: `${pin.y}%` }} onClick={() => setActivePin(i)}>{i + 1}</button>)}
         </div>
         {activePin !== null && pins[activePin] && <div className="pin-editor-field"><label>Flaw {activePin + 1} note<input required maxLength={180} value={pins[activePin].note}
@@ -108,7 +175,9 @@ export function QuickList({ data, onClose, onListed }: { data: DashboardData; on
         </>}
       </fieldset>}
       {error && <Notice>{error}</Notice>}
-      <button className="button primary" disabled={busy || !!uploading}>{busy ? "Listing…" : uploading ? "Uploading photo…" : "Publish garment"}</button>
+      <button className="button primary" disabled={busy || !!uploading || (preparing && !useOriginal)}>
+        {busy ? "Listing…" : uploading ? "Uploading photo…" : preparing && !useOriginal ? "Preparing front photo…" : "Publish garment"}
+      </button>
     </form>
   </Sheet>;
 }

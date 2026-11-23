@@ -275,6 +275,8 @@ input[type="radio"],input[type="checkbox"] { accent-color: var(--olive); }
 .photo-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; }
 .photo-fields .file-field { display: grid; justify-items: center; align-content: center; text-align: center; }
 .photo-fields .file-field img { width: 44px; height: 44px; object-fit: cover; border-radius: 4px; }
+.front-background { display: grid; gap: .55rem; }
+.front-background-preview { max-height: 270px; width: auto; max-width: 100%; margin-inline: auto; border: 1px solid var(--border); border-radius: 8px; }
 .pin-canvas { position: relative; max-width: 275px; width: 100%; margin: .3rem auto; }
 .pin-canvas > button:first-child { display: block; width: 100%; border-radius: 8px; overflow: hidden; cursor: crosshair; }
 .pin-canvas img { width: 100%; }

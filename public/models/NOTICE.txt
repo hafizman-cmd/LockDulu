@@ -1,0 +1,5 @@
+U²-Net lightweight foreground segmentation model (U2NETP)
+Authors: Xuebin Qin, Zichen Zhang, Chenyang Huang, Masood Dehghan, Osmar R. Zaiane, and Martin Jagersand
+Project: https://github.com/xuebinqin/U-2-Net
+License: Apache License 2.0 (see LICENSE-u2net.txt)
+ONNX distribution: https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx
