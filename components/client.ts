@@ -20,6 +20,10 @@ export function action<T>(name: string, data: object = {}, signal?: AbortSignal)
 }
 
 export function upload<T>(kind: "garment" | "qr" | "receipt", form: FormData) {
+  const file = form.get("file");
+  if (file instanceof File && file.size > 4 * 1024 * 1024) {
+    return Promise.reject(new Error("Choose an image smaller than 4 MB."));
+  }
   return json<T>(`/api/upload?kind=${kind}`, { method: "POST", body: form });
 }
 

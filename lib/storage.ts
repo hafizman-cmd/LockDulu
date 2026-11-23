@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
+import { del, get, put } from "@vercel/blob";
 import sharp from "sharp";
 import { appKey } from "./security";
 import { HttpError } from "./http";
@@ -39,16 +40,34 @@ export const storage = {
     }
     const sealed = kind === "receipt";
     const name = randomUUID() + (sealed ? ".bin" : ".webp");
-    await mkdir(root, { recursive: true });
-    await writeFile(path.join(root, name), sealed ? encrypt(image) : image, { flag: "wx" });
+    const content = sealed ? encrypt(image) : image;
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
+      await put(`lockdulu/${name}`, content, {
+        access: "private", contentType: sealed ? "application/octet-stream" : "image/webp",
+      });
+    } else {
+      if (process.env.VERCEL) throw new Error("BLOB_READ_WRITE_TOKEN is required on Vercel.");
+      await mkdir(root, { recursive: true });
+      await writeFile(path.join(root, name), content, { flag: "wx" });
+    }
     return { name, url: sealed ? name : `/api/media/${name}` };
   },
   async removeReceipt(name: string) {
-    if (receiptName.test(name)) await unlink(path.join(root, name)).catch(error => console.error(error));
+    if (!receiptName.test(name)) return;
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
+      await del(`lockdulu/${name}`).catch(error => console.error(error));
+    } else {
+      await unlink(path.join(root, name)).catch(error => console.error(error));
+    }
   },
   async read(name: string, sealed = false) {
     if (!(sealed ? receiptName : imageName).test(name)) throw new HttpError("Image not found.", 404);
-    const content = await readFile(path.join(root, name)).catch(() => null);
+    let content: Buffer | null = null;
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
+      const result = await get(`lockdulu/${name}`, { access: "private" });
+      if (result?.statusCode === 200) content = Buffer.from(await new Response(result.stream).arrayBuffer());
+    }
+    if (!content && !process.env.VERCEL) content = await readFile(path.join(root, name)).catch(() => null);
     if (!content) throw new HttpError("Image not found.", 404);
     return sealed ? decrypt(content) : content;
   },

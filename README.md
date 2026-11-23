@@ -28,10 +28,10 @@ The seed preserves existing orders, inventory changes, and settings when rerun. 
 - The server calculates the exact total from a quote captured at reservation time. Ship Now includes the quoted shipping fee. Hold Box charges the garment amount and lets the buyer request dispatch, with the seller arranging combined shipping.
 - Rejecting a receipt releases its garment and retains the rejected order. The app keeps the unique garment-to-order link only for a current reservation or a completed sale.
 - The Hold Box uses the checkout phone number plus a private browser token. Buyers should open it in the browser used to place the order. Keep that browser data until the parcel ships.
-- Garment and QR uploads are saved under `public/uploads/`. Receipt files are encrypted on disk and returned through the authenticated seller receipt route. The storage adapter is in `lib/storage.ts`.
+- When `BLOB_READ_WRITE_TOKEN` is configured, uploads go to a private Vercel Blob store. The app serves garment and QR images through its media route and serves encrypted receipts only through the authenticated seller receipt route. Local development without a Blob token saves files in `public/uploads/`. Uploads are limited to 4 MB per image.
 
 ## Production
 
-Run `npm run typecheck`, `npm run build`, and `npm start`. The service worker registers in the production build. Use HTTPS for installation and seller sessions. Set `APP_ORIGIN` to the public HTTPS origin when proxying the app, and use a persistent local upload volume or swap the storage adapter for shared object storage before scaling across instances. Keep the receipt encryption secret with your backups. Rotating it requires preserving a way to decrypt existing receipts.
+Run `npm run typecheck`, `npm run build`, and `npm start`. The service worker registers in the production build. Use HTTPS for installation and seller sessions. Set `APP_ORIGIN` to the public HTTPS origin when proxying the app. For Vercel, connect a private Blob store to the project and ensure `BLOB_READ_WRITE_TOKEN` is available in the deployment environment. Existing files in `public/uploads/` need to be transferred to the Blob store before using them on Vercel. Keep the receipt encryption secret with your backups. Rotating it requires preserving a way to decrypt existing receipts.
 
 The offline shell explains how to reconnect. Availability and payments require a network connection so the app can check live inventory and order state.
