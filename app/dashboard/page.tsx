@@ -8,5 +8,5 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage() {
   const id = await currentSeller();
   const data = id ? await dashboardData(id) : null;
-  return data ? <Dashboard initial={data} /> : <SellerLogin />;
+  return data ? <Dashboard initial={data} publicOrigin={process.env.APP_ORIGIN} /> : <SellerLogin />;
 }

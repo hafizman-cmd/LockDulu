@@ -10,6 +10,7 @@ import type { DashboardData } from "@/lib/seller";
 import { action, message, useClock, usePolling } from "./client";
 import { Footer, Header, Notice, Sheet, Stage } from "./common";
 import { QuickList, StoreSettings } from "./seller-forms";
+import { ShareStorefront } from "./share-storefront";
 
 const tabs = [
   { key: "receipts", label: "Receipts", icon: ReceiptText },
@@ -74,7 +75,7 @@ export function SellerLogin() {
 type PendingAction = { type: "review"; orderId: string; paid: boolean; code: string } | { type: "ship"; ids: string[]; buyer: string };
 type Order = DashboardData["orders"][number];
 
-export function Dashboard({ initial }: { initial: DashboardData }) {
+export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; publicOrigin?: string }) {
   const router = useRouter();
   const get = useCallback((signal?: AbortSignal) => action<DashboardData>("dashboard", {}, signal), []);
   const [data, setData] = usePolling(initial, get, 5000);
@@ -133,6 +134,7 @@ export function Dashboard({ initial }: { initial: DashboardData }) {
           }}><LogOut size={18} strokeWidth={1.5} /></button>
         </div>
       </div>
+      <ShareStorefront key={seller.storeSlug} storeSlug={seller.storeSlug} publicOrigin={publicOrigin} />
       <nav className="dashboard-tabs" aria-label="Seller sections">
         {tabs.map(({ key, label, icon: Icon }) => <button key={key} aria-current={tab === key ? "page" : undefined} className={tab === key ? "selected" : ""}
           onClick={() => { setTab(key); setError(""); setSuccess(""); }}><Icon size={17} strokeWidth={1.5} /> {label}

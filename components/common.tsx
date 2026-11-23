@@ -21,7 +21,8 @@ export function Header({ storeSlug, seller = false }: { storeSlug?: string; sell
     <div className="wrap header-inner">
       <Brand />
       <nav className="header-nav" aria-label="Main navigation">
-        <Link className="desktop-nav" href={storeSlug ? `/${storeSlug}` : "/"}>Storefront</Link>
+        {storeSlug && <Link className="desktop-nav" href={`/${storeSlug}`}>Storefront</Link>}
+        <Link className="desktop-nav" href="/">Browse shops</Link>
         <Link className="desktop-nav" href={seller ? "/dashboard" : "/locker"}>{seller ? "Dashboard" : "My Hold Box"}</Link>
       </nav>
       <div className="header-actions">
@@ -35,7 +36,8 @@ export function Header({ storeSlug, seller = false }: { storeSlug?: string; sell
         <button className="icon-button menu-trigger" aria-expanded={menu} aria-controls="header-menu" aria-label="Navigation menu" onClick={() => setMenu(!menu)}>{menu ? <X size={19} strokeWidth={1.5} /> : <Menu size={19} strokeWidth={1.5} />}</button>
       </div>
       {menu && <nav id="header-menu" className="surface mobile-menu" aria-label="Navigation">
-        <Link href={storeSlug ? `/${storeSlug}` : "/"} onClick={() => setMenu(false)}>Storefront</Link>
+        {storeSlug && <Link href={`/${storeSlug}`} onClick={() => setMenu(false)}>Storefront</Link>}
+        <Link href="/" onClick={() => setMenu(false)}>Browse shops</Link>
         <Link href="/locker" onClick={() => setMenu(false)}>My Hold Box</Link>
         <Link href="/dashboard" onClick={() => setMenu(false)}>Seller dashboard</Link>
       </nav>}
@@ -45,6 +47,16 @@ export function Header({ storeSlug, seller = false }: { storeSlug?: string; sell
 
 export function Footer({ storeName }: { storeName?: string }) {
   return <footer className="site-footer"><div className="wrap footer-inner"><Brand /><span>{storeName ?? "Live vintage drops"}</span><Link href="/dashboard">Seller dashboard</Link></div></footer>;
+}
+
+export function GarmentPhoto({ src, alt, className, loading, onUnavailable }: {
+  src?: string; alt: string; className?: string; loading?: "lazy" | "eager"; onUnavailable?: () => void;
+}) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  if (!src || failedSrc === src) {
+    return <div className={`photo-unavailable ${className ?? ""}`} role="img" aria-label="Photo unavailable">Photo unavailable</div>;
+  }
+  return <img src={src} alt={alt} className={className} loading={loading} draggable={false} onError={() => { setFailedSrc(src); onUnavailable?.(); }} />;
 }
 
 export function Stage({ item, now, showCondition = false }: { item: GarmentView; now: number; showCondition?: boolean }) {

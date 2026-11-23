@@ -7,7 +7,7 @@ import {
 import { grades, money, statuses, timer, whatsapp, type GarmentView, type Quote } from "@/lib/catalog";
 import type { readItem } from "@/lib/inventory";
 import { action, forgetLock, json, message, readLocal, RequestError, savedLocks, saveLock, upload, useClock, usePolling, writeLocal, type SavedLock } from "./client";
-import { Footer, Header, Notice, Sheet, Stage } from "./common";
+import { Footer, GarmentPhoto, Header, Notice, Sheet, Stage } from "./common";
 
 type ItemData = NonNullable<Awaited<ReturnType<typeof readItem>>>;
 type Delivery = { buyerName: string; buyerPhone: string; shippingAddress: string; fulfillmentType: "SHIP_NOW" | "HOLD_BOX" };
@@ -21,6 +21,7 @@ const deliveryKey = "lockdulu.delivery";
 function Gallery({ item }: { item: GarmentView }) {
   const [index, setIndex] = useState(0);
   const [pin, setPin] = useState<number | null>(null);
+  const [unavailable, setUnavailable] = useState<string[]>([]);
   const touchdown = useRef(0);
   const go = (next: number) => { setIndex((next + item.images.length) % item.images.length); setPin(null); };
   return <div className="gallery">
@@ -31,8 +32,8 @@ function Gallery({ item }: { item: GarmentView }) {
         if (Math.abs(dx) > 48) go(index + (dx < 0 ? 1 : -1));
       }}>
       {item.images[index] ? <div className="gallery-photo">
-        <img src={item.images[index]} alt={`${item.title} · ${photoNames[index] ?? "Photo"}`} draggable={false} />
-        {index < 2 && item.flawPins.map((point, i) => (point.photo ?? "front") === (index === 0 ? "front" : "back") && <button key={i} className="flaw-pin" style={{ left: `${point.x}%`, top: `${point.y}%` }}
+        <GarmentPhoto src={item.images[index]} alt={`${item.title} · ${photoNames[index] ?? "Photo"}`} onUnavailable={() => setUnavailable(current => [...current, item.images[index]])} />
+        {!unavailable.includes(item.images[index]) && index < 2 && item.flawPins.map((point, i) => (point.photo ?? "front") === (index === 0 ? "front" : "back") && <button key={i} className="flaw-pin" style={{ left: `${point.x}%`, top: `${point.y}%` }}
           aria-label={`View flaw ${i + 1}`} aria-pressed={i === pin} onClick={() => setPin(pin === i ? null : i)}>{i + 1}</button>)}
       </div> : <p className="muted">No photo available</p>}
       {item.images.length > 1 && <div className="gallery-arrows">
@@ -43,7 +44,7 @@ function Gallery({ item }: { item: GarmentView }) {
     {pin !== null && <div className="pin-note" role="status"><b>{pin + 1}</b> {item.flawPins[pin]?.note}</div>}
     {item.images.length > 1 && <div className="thumbnails" aria-label="Garment photos">
       {item.images.map((image, i) => <button className={i === index ? "selected" : ""} key={i} onClick={() => go(i)} aria-pressed={i === index}>
-        <img src={image} alt="" /><span>{photoNames[i] ?? "Photo"}</span>
+        <GarmentPhoto src={image} alt="" /><span>{photoNames[i] ?? "Photo"}</span>
       </button>)}
     </div>}
   </div>;

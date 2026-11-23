@@ -57,22 +57,45 @@ export function garmentView(item: Garment & { drop: Drop | null }): GarmentView 
 export const storeSelect = { storeName: true, storeSlug: true, bio: true, whatsappNumber: true } as const;
 
 export async function readStore(slug: string) {
-  const seller = await db().seller.findUnique({ where: { storeSlug: slug.toLowerCase() }, select: { ...storeSelect, id: true } });
-  if (!seller) return null;
-  await Promise.all([releaseExpired({ sellerId: seller.id }), openDueDrops(seller.id)]);
-  const [items, drops] = await Promise.all([
-    db().garment.findMany({ where: { sellerId: seller.id }, include: { drop: true }, orderBy: { code: "asc" } }),
-    db().drop.findMany({ where: { sellerId: seller.id, status: { not: "ENDED" } }, orderBy: { scheduledAt: "asc" } }),
+  const storeSlug = slug.toLowerCase();
+  const [seller, initialItems, initialDrops] = await Promise.all([
+    db().seller.findUnique({ where: { storeSlug }, select: { ...storeSelect, id: true } }),
+    db().garment.findMany({ where: { seller: { storeSlug } }, include: { drop: true }, orderBy: { code: "asc" } }),
+    db().drop.findMany({ where: { seller: { storeSlug }, status: { not: "ENDED" } }, orderBy: { scheduledAt: "asc" } }),
   ]);
+  if (!seller) return null;
+  const now = Date.now();
+  const hasExpiredLocks = initialItems.some(item => item.status === "LOCKED" && item.lockedUntil && item.lockedUntil.getTime() <= now);
+  const hasDueDrops = initialDrops.some(drop => drop.status === "UPCOMING" && drop.scheduledAt.getTime() <= now);
+  let items = initialItems;
+  let drops = initialDrops;
+  if (hasExpiredLocks || hasDueDrops) {
+    await Promise.all([
+      hasExpiredLocks && releaseExpired({ sellerId: seller.id }),
+      hasDueDrops && openDueDrops(seller.id),
+    ]);
+    [items, drops] = await Promise.all([
+      db().garment.findMany({ where: { sellerId: seller.id }, include: { drop: true }, orderBy: { code: "asc" } }),
+      db().drop.findMany({ where: { sellerId: seller.id, status: { not: "ENDED" } }, orderBy: { scheduledAt: "asc" } }),
+    ]);
+  }
   const { id: _sellerId, ...store } = seller;
   return { store, items: items.map(garmentView), drops: drops.map(drop => ({ id: drop.id, title: drop.title, status: drop.status, scheduledAt: drop.scheduledAt.toISOString() })), serverTime: Date.now() };
 }
 
 export async function readItem(id: string) {
-  const owner = await db().garment.findUnique({ where: { id }, select: { sellerId: true } });
-  if (!owner) return null;
-  await Promise.all([releaseExpired({ id }), openDueDrops(owner.sellerId)]);
-  const item = await db().garment.findUnique({ where: { id }, include: { drop: true, seller: { select: storeSelect } } });
+  let item = await db().garment.findUnique({ where: { id }, include: { drop: true, seller: { select: storeSelect } } });
+  if (!item) return null;
+  const now = Date.now();
+  const hasExpiredLock = item.status === "LOCKED" && item.lockedUntil && item.lockedUntil.getTime() <= now;
+  const hasDueDrop = item.drop?.status === "UPCOMING" && item.drop.scheduledAt.getTime() <= now;
+  if (hasExpiredLock || hasDueDrop) {
+    await Promise.all([
+      hasExpiredLock && releaseExpired({ id }),
+      hasDueDrop && openDueDrops(item.sellerId),
+    ]);
+    item = await db().garment.findUnique({ where: { id }, include: { drop: true, seller: { select: storeSelect } } });
+  }
   return item && { item: garmentView(item), store: item.seller, serverTime: Date.now() };
 }
 

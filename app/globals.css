@@ -54,6 +54,7 @@ svg { flex-shrink: 0; }
 .glass { background: var(--glass); border: 1px solid var(--glass-border); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
 .surface { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
 .muted { color: var(--muted-readable); }
+.photo-unavailable { display: grid; place-items: center; padding: .5rem; background: var(--soft); color: var(--muted-readable); text-align: center; font-size: .8rem; }
 .eyebrow { display: inline-flex; align-items: center; gap: .4rem; font-size: .75rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted-readable); }
 .timer { color: var(--rust); font-variant-numeric: tabular-nums; }
 .button, .icon-button { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; min-height: 44px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; font-weight: 650; font-size: .93rem; line-height: 1.2; text-align: center; }
@@ -88,6 +89,27 @@ svg { flex-shrink: 0; }
 .footer-inner .brand-mark { width: 27px; height: 27px; }
 .footer-inner .brand-mark svg { width: 16px; }
 .footer-inner > a:last-child { margin-left: auto; }
+
+.share-storefront { display: grid; gap: .45rem; padding: 1rem; margin-block-end: 1rem; }
+.share-storefront h2 { font-size: 1.2rem; }
+.share-storefront p { font-size: .88rem; }
+.share-storefront-fields { display: flex; flex-wrap: wrap; gap: .55rem; max-width: 44rem; }
+.share-storefront-fields input { flex: 1 1 13rem; }
+.share-storefront [role="status"]:empty { margin-top: -.45rem; }
+
+.shop-directory { min-height: 65vh; padding-block: clamp(2rem, 6vw, 4.5rem); }
+.shop-directory h1 { font-size: clamp(2.4rem, 6vw, 4rem); }
+.shop-search { max-width: 36rem; margin-block: 1.5rem 2rem; }
+.shop-search-fields { display: flex; gap: .55rem; }
+.shop-search-fields input { min-width: 0; }
+.shop-search .text-button { display: inline-flex; align-items: center; padding-inline: 0; }
+.shop-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: .9rem; }
+.shop-card { min-height: 100%; display: flex; align-items: flex-start; gap: .85rem; padding: 1rem; }
+.shop-card:hover { border-color: var(--olive); }
+.shop-card .store-emblem { flex-shrink: 0; }
+.shop-card-info { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.shop-card h2 { font-size: 1.2rem; margin-bottom: .25rem; }
+.shop-bio { margin-top: .5rem; font-size: .88rem; }
 
 .storefront { padding-block: 1.3rem 3.1rem; }
 .store-line { display: flex; align-items: center; gap: .65rem; margin-bottom: 1.1rem; }
@@ -186,6 +208,7 @@ input[type="radio"],input[type="checkbox"] { accent-color: var(--olive); }
 .gallery-main { position: relative; aspect-ratio: 1; container-type: size; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; touch-action: pan-y; background: var(--soft); }
 .gallery-photo { position: relative; }
 .gallery-photo img { max-width: 100cqw; max-height: 100cqh; user-select: none; }
+.gallery-photo .photo-unavailable { width: min(100cqw, 400px); height: min(100cqh, 400px); }
 .gallery-arrows { position: absolute; bottom: .55rem; right: .55rem; display: flex; gap: .3rem; }
 .gallery-arrows .icon-button { box-shadow: 0 2px 8px #0002; }
 .flaw-pin { display: grid; place-items: center; position: absolute; transform: translate(-50%, -50%); width: 31px; height: 31px; border-radius: 50%; background: #fffffff0; border: 1px solid #18181b; color: #18181b; font-weight: 750; font-size: .78rem; box-shadow: 0 1px 6px #0004; }
@@ -196,6 +219,7 @@ input[type="radio"],input[type="checkbox"] { accent-color: var(--olive); }
 .thumbnails button { border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--surface); font-size: .78rem; font-weight: 650; }
 .thumbnails button.selected { outline: 1px solid var(--text); }
 .thumbnails img { width: 60px; height: 53px; object-fit: cover; }
+.thumbnails .photo-unavailable { width: 60px; height: 53px; font-size: .65rem; }
 .thumbnails span { display: block; padding-block: .15rem; }
 .detail-copy h1 { font-size: clamp(2.15rem, 5vw, 3.65rem); }
 .detail-top { display: flex; justify-content: space-between; align-items: center; gap: .6rem; }

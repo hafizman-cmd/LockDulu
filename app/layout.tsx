@@ -18,5 +18,5 @@ export const viewport: Viewport = {
 };
 
 export default function Layout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en-MY"><body><RegisterWorker />{children}</body></html>;
+  return <html lang="en-MY" data-scroll-behavior="smooth"><body><RegisterWorker />{children}</body></html>;
 }
