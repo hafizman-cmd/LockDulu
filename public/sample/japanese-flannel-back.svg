@@ -1,0 +1,24 @@
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 750">
+  <defs>
+    <radialGradient id="ground" cx=".4" cy=".35" r=".8"><stop stop-color="#eee5d6"/><stop offset="1" stop-color="#d1c6b4"/></radialGradient>
+    <linearGradient id="cloth" x2="1" y2="1"><stop stop-color="#777466"/><stop offset=".47" stop-color="#777466"/><stop offset="1" stop-color="#593d30"/></linearGradient>
+    <pattern id="weave" width="52" height="52" patternUnits="userSpaceOnUse" patternTransform="rotate(-2)"><path d="M9 0V52 M34 0V52 M0 8H52 M0 36H52" stroke="#7f4635" stroke-width="12" opacity=".75"/><path d="M18 0V52 M0 19H52" stroke="#d3a376" stroke-width="2" opacity=".77"/></pattern>
+    <filter id="grain" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency=".7" numOctaves="3" seed="3"/><feColorMatrix type="saturate" values="0"/></filter>
+    <filter id="shadow"><feGaussianBlur stdDeviation="13"/></filter>
+    <clipPath id="cut"><path d="M205 146 L255 119 Q300 147 345 119 L395 146 Q436 163 451 208 L535 615 L449 644 L398 366 L391 635 Q300 657 209 635 L202 366 L151 644 L65 615 L149 208 Q165 164 205 146Z"/></clipPath>
+    <linearGradient id="fold"><stop stop-color="#100d09" stop-opacity="0"/><stop offset=".45" stop-color="#100d09" stop-opacity=".25"/><stop offset=".56" stop-color="#eee2c8" stop-opacity=".16"/><stop offset="1" stop-color="#eee2c8" stop-opacity="0"/></linearGradient>
+  </defs>
+  <path fill="url(#ground)" d="M0 0H600V750H0Z"/><path d="M0 0H600V750H0Z" filter="url(#grain)" opacity=".09"/>
+  <g transform="rotate(2 300 375)">
+    <path d="M205 146 L255 119 Q300 147 345 119 L395 146 Q436 163 451 208 L535 615 L449 644 L398 366 L391 635 Q300 657 209 635 L202 366 L151 644 L65 615 L149 208 Q165 164 205 146Z" fill="#382d1f" opacity=".32" filter="url(#shadow)" transform="translate(8 13)"/>
+    <path d="M205 146 L255 119 Q300 147 345 119 L395 146 Q436 163 451 208 L535 615 L449 644 L398 366 L391 635 Q300 657 209 635 L202 366 L151 644 L65 615 L149 208 Q165 164 205 146Z" fill="url(#cloth)" stroke="#593d30" stroke-width="2"/>
+    <g clip-path="url(#cut)">
+      <path d="M0 0H600V750H0Z" fill="url(#weave)"/>
+      <path d="M0 0H600V750H0Z" filter="url(#grain)" opacity=".24" style="mix-blend-mode:soft-light"/>
+      <path d="M148 205 Q204 290 180 502 Q214 610 189 655 H249 Q227 592 222 509 Q245 296 195 158Z M349 175 Q389 312 355 486 Q380 618 365 658 H409 Q395 562 405 492 Q427 307 379 164Z" fill="url(#fold)"/>
+      <g fill="none" stroke="#593d30" stroke-width="2.4" stroke-linecap="round" opacity=".8"><path d="M208 169 Q188 257 208 323 M392 169 Q414 262 391 323 M210 609 Q300 629 392 607"/><path d="M75 586 L158 608 M442 608 L525 586 M211 589 Q300 607 390 589"/><path d="M199 236 Q300 264 401 236 M220 570 Q270 542 294 555 M313 367 Q362 388 380 423"/></g>
+      
+      <path d="M0 0H600V750H0Z" filter="url(#grain)" opacity=".10" style="mix-blend-mode:multiply"/>
+    </g>
+  </g>
+</svg>

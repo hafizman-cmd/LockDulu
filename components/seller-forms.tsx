@@ -1,0 +1,131 @@
+"use client";
+import { useState } from "react";
+import { ImagePlus, Minus, Plus, QrCode, Trash2 } from "lucide-react";
+import { categories, grades, type Pin } from "@/lib/catalog";
+import type { DashboardData } from "@/lib/seller";
+import { action, message, upload } from "./client";
+import { Notice, Sheet } from "./common";
+
+async function sendImage(file: File, kind: "garment" | "qr") {
+  const form = new FormData();
+  form.set("file", file);
+  return (await upload<{ url: string }>(kind, form)).url;
+}
+
+function Stepper({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const update = (amount: number) => onChange(String(Math.min(100, Math.max(5, (Number(value) || 0) + amount))));
+  return <label>{label}<div className="stepper">
+    <button type="button" className="icon-button" onClick={() => update(-0.5)} aria-label={`Decrease ${label}`}><Minus size={16} strokeWidth={1.5} /></button>
+    <input required type="number" inputMode="decimal" min="5" max="100" step=".1" value={value} onChange={event => onChange(event.target.value)} />
+    <button type="button" className="icon-button" onClick={() => update(0.5)} aria-label={`Increase ${label}`}><Plus size={16} strokeWidth={1.5} /></button>
+  </div></label>;
+}
+
+export function QuickList({ data, onClose, onListed }: { data: DashboardData; onClose: () => void; onListed: (code: string) => Promise<void> }) {
+  const [grade, setGrade] = useState<keyof typeof grades>("VINTAGE_FADE");
+  const [photos, setPhotos] = useState<(string | null)[]>([null, null, null]);
+  const [uploading, setUploading] = useState(0);
+  const [pins, setPins] = useState<Pin[]>([]);
+  const [activePin, setActivePin] = useState<number | null>(null);
+  const [pit, setPit] = useState("22");
+  const [length, setLength] = useState("28");
+  const [category, setCategory] = useState<string>("Tee");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function attach(file: File, index: number) {
+    setUploading(count => count + 1); setError("");
+    try {
+      const url = await sendImage(file, "garment");
+      setPhotos(current => current.map((photo, i) => i === index ? url : photo));
+      if (index === 0) { setPins([]); setActivePin(null); }
+    } catch (exception) { setError(message(exception)); } finally { setUploading(count => count - 1); }
+  }
+
+  return <Sheet title="Quick list a garment" onClose={() => { if (!busy) onClose(); }}>
+    <form className="stack" onSubmit={async event => {
+      event.preventDefault(); setError("");
+      if (!photos[0] || (photos[2] && !photos[1])) { setError("Upload a front photo first. Add a back photo before the tag photo."); return; }
+      if (pins.some(pin => !pin.note.trim())) { setError("Add a note to each flaw pin or remove it."); return; }
+      const fields = new FormData(event.currentTarget);
+      setBusy(true);
+      try {
+        const result = await action<{ code: string }>("list", {
+          dropId: fields.get("dropId") || null,
+          listing: { title: fields.get("title"), brand: fields.get("brand"), price: fields.get("price"),
+            category: fields.get("category"), conditionNotes: fields.get("conditionNotes"),
+            pitInches: Number(pit), lengthInches: Number(length), conditionGrade: grade,
+            images: photos.filter(Boolean), flawPins: pins,
+          },
+        });
+        await onListed(result.code);
+      } catch (exception) { setError(message(exception)); } finally { setBusy(false); }
+    }}>
+      <div className="order-ref"><span>Next item code</span><strong>B-{String(data.seller.nextItemNumber).padStart(3, "0")}</strong></div>
+      <label>Garment title<input name="title" required maxLength={100} placeholder="Carhartt Detroit Work Jacket" /></label>
+      <div className="field-grid"><label>Brand<input name="brand" required maxLength={70} /></label><label>Price (RM)<input name="price" required type="number" min=".01" max="999999" step=".01" inputMode="decimal" /></label></div>
+      <div className="field-grid"><label>Category<select name="category" value={category} onChange={event => setCategory(event.target.value)}>{categories.map(entry => <option key={entry}>{entry}</option>)}</select></label>
+        <label>Drop<select name="dropId" defaultValue={data.drops.find(drop => drop.status === "LIVE")?.id ?? ""}><option value="">No drop</option>{data.drops.map(drop => <option value={drop.id} key={drop.id}>{drop.title}</option>)}</select></label></div>
+      <div className="field-grid"><Stepper label={category === "Pants" ? "Waist (in)" : "Pit (in)"} value={pit} onChange={setPit} /><Stepper label={category === "Pants" ? "Outseam (in)" : "Labuh (in)"} value={length} onChange={setLength} /></div>
+      <fieldset><legend>Condition grade</legend><div className="grade-pills">{Object.entries(grades).map(([key, value]) => <button type="button" aria-pressed={key === grade} key={key} className={key === grade ? "selected" : ""} onClick={() => setGrade(key as keyof typeof grades)}>{value}</button>)}</div></fieldset>
+      <label>Condition notes<textarea name="conditionNotes" maxLength={1000} rows={2} /></label>
+      <fieldset><legend>Photos</legend><div className="photo-fields">
+        {["Front", "Back", "Tag"].map((label, i) => <label className="file-field" key={label}>
+          {photos[i] ? <img src={photos[i]} alt="" /> : <ImagePlus size={21} strokeWidth={1.5} />}
+          <span>{label}</span><input type="file" aria-label={`${label} photo`} accept="image/*" disabled={busy || uploading > 0} onChange={event => {
+            const file = event.target.files?.[0]; event.target.value = ""; if (file) void attach(file, i);
+          }} />
+        </label>)}
+      </div></fieldset>
+      {photos[0] && <fieldset className="pin-editor">
+        <legend>Flaw pins</legend><p className="muted">Tap the image to mark a flaw and describe it below.</p>
+        <div className="pin-canvas">
+          <button type="button" aria-label="Place a flaw pin on the front photo" onClick={event => {
+            if (pins.length >= 12) return;
+            const bounds = event.currentTarget.getBoundingClientRect();
+            const clamp = (value: number) => Math.round(Math.min(100, Math.max(0, value)) * 100) / 100;
+            const x = event.detail ? clamp((event.clientX - bounds.left) / bounds.width * 100) : 50;
+            const y = event.detail ? clamp((event.clientY - bounds.top) / bounds.height * 100) : 50;
+            setPins([...pins, { x, y, note: "" }]); setActivePin(pins.length);
+          }}><img src={photos[0]} alt="Front garment photo for marking flaws" /></button>
+          {pins.map((pin, i) => <button type="button" key={i} className="flaw-pin" aria-label={`Edit flaw ${i + 1}`} aria-pressed={activePin === i} style={{ left: `${pin.x}%`, top: `${pin.y}%` }} onClick={() => setActivePin(i)}>{i + 1}</button>)}
+        </div>
+        {activePin !== null && pins[activePin] && <div className="pin-editor-field"><label>Flaw {activePin + 1} note<input required maxLength={180} value={pins[activePin].note}
+          onChange={event => setPins(pins.map((pin, i) => i === activePin ? { ...pin, note: event.target.value } : pin))} /></label>
+          <button className="icon-button" type="button" aria-label="Remove flaw pin" onClick={() => { setPins(pins.filter((_, i) => i !== activePin)); setActivePin(null); }}><Trash2 size={18} strokeWidth={1.5} /></button></div>}
+      </fieldset>}
+      {error && <Notice>{error}</Notice>}
+      <button className="button primary" disabled={busy || !!uploading}>{busy ? "Listing…" : uploading ? "Uploading photo…" : "Publish garment"}</button>
+    </form>
+  </Sheet>;
+}
+
+export function StoreSettings({ seller, onSaved }: { seller: DashboardData["seller"]; onSaved: () => Promise<void> }) {
+  const [qr, setQr] = useState(seller.qrCodeUrl);
+  const [uploading, setUploading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return <form className="surface stack settings-form" onSubmit={async event => {
+    event.preventDefault(); setBusy(true); setError("");
+    const fields = new FormData(event.currentTarget);
+    try {
+      await action("settings", { settings: { ...Object.fromEntries(fields), qrCodeUrl: qr, holdBoxDays: Number(fields.get("holdBoxDays")) } });
+      await onSaved();
+    } catch (exception) { setError(message(exception)); } finally { setBusy(false); }
+  }}>
+    <div className="qr-settings"><img src={qr} alt="Current DuitNow QR" />
+      <label className="file-field"><QrCode size={23} strokeWidth={1.5} /><span>{uploading ? "Uploading QR…" : "Replace DuitNow QR"}<small>Upload the static QR from your bank or eWallet.</small></span>
+        <input type="file" aria-label="Replace DuitNow QR" accept="image/*" disabled={uploading || busy} onChange={async event => {
+          const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
+          setUploading(true); setError("");
+          try { setQr(await sendImage(file, "qr")); }
+          catch (exception) { setError(message(exception)); } finally { setUploading(false); }
+        }} /></label></div>
+    <label>QR account name<input name="qrAccountName" required maxLength={100} defaultValue={seller.qrAccountName} /></label>
+    <label>Bank / eWallet label<input name="qrBankLabel" required maxLength={100} defaultValue={seller.qrBankLabel} /></label>
+    <div className="field-grid"><label>Shipping fee (RM)<input name="shippingFee" required type="number" inputMode="decimal" min="0" max="999999" step=".01" defaultValue={seller.shippingFee} /></label>
+      <label>Hold Box days<input name="holdBoxDays" required type="number" inputMode="numeric" min="1" max="90" defaultValue={seller.holdBoxDays} /></label></div>
+    {error && <Notice>{error}</Notice>}
+    <button className="button primary" disabled={busy || uploading}>{busy ? "Saving…" : "Save settings"}</button>
+  </form>;
+}

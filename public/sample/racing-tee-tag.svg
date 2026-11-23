@@ -1,0 +1,24 @@
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 750">
+  <defs>
+    <radialGradient id="ground" cx=".4" cy=".35" r=".8"><stop stop-color="#eee5d6"/><stop offset="1" stop-color="#d1c6b7"/></radialGradient>
+    <linearGradient id="cloth" x2="1" y2="1"><stop stop-color="#ddd4ba"/><stop offset=".47" stop-color="#ddd4ba"/><stop offset="1" stop-color="#534431"/></linearGradient>
+    <pattern id="weave" width="52" height="52" patternUnits="userSpaceOnUse" patternTransform="rotate(-2)"><path d="M0 0L52 52 M-2 1L50 53" stroke="#e4d4b9" stroke-width=".9" opacity=".16"/></pattern>
+    <filter id="grain" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency=".7" numOctaves="3" seed="3"/><feColorMatrix type="saturate" values="0"/></filter>
+    <filter id="shadow"><feGaussianBlur stdDeviation="13"/></filter>
+    <clipPath id="cut"><path d="M-50 0 H650 V750 H-50Z"/></clipPath>
+    <linearGradient id="fold"><stop stop-color="#100d09" stop-opacity="0"/><stop offset=".45" stop-color="#100d09" stop-opacity=".25"/><stop offset=".56" stop-color="#eee2c8" stop-opacity=".16"/><stop offset="1" stop-color="#eee2c8" stop-opacity="0"/></linearGradient>
+  </defs>
+  <path fill="url(#ground)" d="M0 0H600V750H0Z"/><path d="M0 0H600V750H0Z" filter="url(#grain)" opacity=".09"/>
+  <g transform="rotate(2 300 375)">
+    <path d="M-50 0 H650 V750 H-50Z" fill="#382d1f" opacity=".32" filter="url(#shadow)" transform="translate(8 13)"/>
+    <path d="M-50 0 H650 V750 H-50Z" fill="url(#cloth)" stroke="#534431" stroke-width="2"/>
+    <g clip-path="url(#cut)">
+      <path d="M0 0H600V750H0Z" fill="url(#weave)"/>
+      <path d="M0 0H600V750H0Z" filter="url(#grain)" opacity=".24" style="mix-blend-mode:soft-light"/>
+      <path d="M148 205 Q204 290 180 502 Q214 610 189 655 H249 Q227 592 222 509 Q245 296 195 158Z M349 175 Q389 312 355 486 Q380 618 365 658 H409 Q395 562 405 492 Q427 307 379 164Z" fill="url(#fold)"/>
+      <g fill="none" stroke="#534431" stroke-width="2.4" stroke-linecap="round" opacity=".8"><path d="M-20 250 Q300 -60 620 250 M-20 269 Q300 -39 620 269 M-20 650 Q300 714 620 650" stroke-width="4"/></g>
+      <path d="M187 255 Q300 239 413 255 L404 497 Q300 515 196 497Z" fill="#d6c3a4" stroke="#3d382c" stroke-width="4"/><path d="M204 267Q300 254 395 271 L390 483 Q300 499 210 483 Z" stroke="#5a5040" stroke-dasharray="3 4" fill="none"/><text x="300" y="348" text-anchor="middle" font-family="sans-serif" font-size="23" font-weight="700" fill="#292820">ORIGINAL GARMENT</text><text x="300" y="385" text-anchor="middle" font-family="monospace" font-size="15" fill="#292820">CARE LABEL</text>
+      <path d="M0 0H600V750H0Z" filter="url(#grain)" opacity=".10" style="mix-blend-mode:multiply"/>
+    </g>
+  </g>
+</svg>

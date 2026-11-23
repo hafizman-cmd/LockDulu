@@ -1,0 +1,148 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+  importFileExtension = "ts"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum GarmentStatus {
+  AVAILABLE
+  LOCKED
+  PENDING_VERIFICATION
+  SOLD
+  HOLD_BOX
+}
+
+enum DropStatus {
+  UPCOMING
+  LIVE
+  ENDED
+}
+
+enum GarmentCategory {
+  Tee
+  Jacket
+  Shirt
+  Pants
+  Sweatshirt
+}
+
+enum ConditionGrade {
+  DEADSTOCK
+  LIKE_NEW
+  VINTAGE_FADE
+  DISTRESSED
+}
+
+enum FulfillmentType {
+  SHIP_NOW
+  HOLD_BOX
+}
+
+enum PaymentStatus {
+  AWAITING_RECEIPT
+  PENDING_VERIFICATION
+  VERIFIED_PAID
+  REJECTED
+  EXPIRED
+}
+
+model Seller {
+  id             String   @id @default(cuid())
+  storeName      String
+  storeSlug      String   @unique
+  bio            String
+  whatsappNumber String
+  qrCodeUrl      String
+  qrAccountName  String
+  qrBankLabel    String
+  holdBoxDays    Int      @default(7)
+  shippingFee    Decimal  @default(8.00)
+  passwordHash   String
+  nextItemNumber Int      @default(1)
+  createdAt      DateTime @default(now())
+  drops          Drop[]
+  garments       Garment[]
+  orders         Order[]
+}
+
+model Drop {
+  id          String     @id @default(cuid())
+  sellerId    String
+  seller      Seller     @relation(fields: [sellerId], references: [id])
+  title       String
+  scheduledAt DateTime
+  status      DropStatus
+  garments    Garment[]
+
+  @@index([sellerId, status, scheduledAt])
+}
+
+model Garment {
+  id               String          @id @default(cuid())
+  sellerId         String
+  seller           Seller          @relation(fields: [sellerId], references: [id])
+  dropId           String?
+  drop             Drop?           @relation(fields: [dropId], references: [id])
+  code             String
+  title            String
+  brand            String
+  category         GarmentCategory
+  price            Decimal
+  pitInches        Float
+  lengthInches     Float
+  conditionGrade   ConditionGrade
+  conditionNotes   String
+  images           Json
+  flawPins         Json
+  status           GarmentStatus   @default(AVAILABLE)
+  lockedUntil      DateTime?
+  lockSessionToken String?
+  orderItem        OrderItem?
+
+  @@unique([sellerId, code])
+  @@index([sellerId, status, lockedUntil])
+  @@index([dropId])
+}
+
+model Order {
+  id                  String          @id @default(cuid())
+  sellerId            String
+  seller              Seller          @relation(fields: [sellerId], references: [id])
+  buyerName           String          @default("")
+  buyerPhone          String          @default("")
+  shippingAddress     String          @default("")
+  fulfillmentType     FulfillmentType @default(SHIP_NOW)
+  totalAmount         Decimal
+  itemAmount          Decimal
+  shippingFee         Decimal
+  holdBoxDays         Int
+  qrCodeUrl           String
+  qrAccountName       String
+  qrBankLabel         String
+  garmentCode         String
+  buyerAccessHash     String          @unique
+  receiptImageUrl     String?
+  paymentStatus       PaymentStatus   @default(AWAITING_RECEIPT)
+  createdAt           DateTime        @default(now())
+  verifiedAt          DateTime?
+  dispatchRequestedAt DateTime?
+  shippedAt           DateTime?
+  items               OrderItem[]
+
+  @@index([sellerId, paymentStatus])
+  @@index([buyerPhone, paymentStatus])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id])
+  garmentId String  @unique
+  garment   Garment @relation(fields: [garmentId], references: [id])
+
+  @@index([orderId])
+}
