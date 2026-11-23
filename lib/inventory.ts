@@ -182,7 +182,7 @@ export async function submitReceipt(orderId: string, token: string, details: z.i
     if (!changed.count) {
       const current = await tx.order.findUniqueOrThrow({ where: { id: orderId }, select: { paymentStatus: true } });
       if (current.paymentStatus === "PENDING_VERIFICATION" || current.paymentStatus === "VERIFIED_PAID") {
-        return { orderId, code: order.garmentCode, stored: false };
+        return { orderId, code: order.garmentCode, status: current.paymentStatus, stored: false };
       }
       throw new HttpError("Your lock has expired or been released.", 409);
     }
@@ -190,7 +190,7 @@ export async function submitReceipt(orderId: string, token: string, details: z.i
       ...details, receiptImageUrl, paymentStatus: "PENDING_VERIFICATION",
       totalAmount: details.fulfillmentType === "HOLD_BOX" ? order.itemAmount : order.itemAmount.plus(order.shippingFee),
     } });
-    return { orderId, code: order.garmentCode, stored: true };
+    return { orderId, code: order.garmentCode, status: "PENDING_VERIFICATION" as const, stored: true };
   });
 }
 

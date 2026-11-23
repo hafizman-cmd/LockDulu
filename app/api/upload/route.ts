@@ -34,14 +34,14 @@ export async function POST(request: Request) {
     const details = delivery.parse(JSON.parse(String(form.get("delivery"))));
     const existing = await orderState(orderId, accessToken);
     if (existing.status === "PENDING_VERIFICATION" || existing.status === "VERIFIED_PAID") {
-      return { orderId, code: existing.code };
+      return { orderId, code: existing.code, status: existing.status };
     }
     if (!existing.quote) throw new HttpError("Your lock has expired or been released.", 409);
     const receipt = await storage.save(file, "receipt");
     try {
       const result = await submitReceipt(orderId, accessToken, details, receipt.url);
       if (!result.stored) await storage.removeReceipt(receipt.name);
-      return { orderId, code: result.code };
+      return { orderId, code: result.code, status: result.status };
     } catch (error) {
       // Keep the file if the database cannot confirm the transaction outcome.
       if (error instanceof HttpError) await storage.removeReceipt(receipt.name);

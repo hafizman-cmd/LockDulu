@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { Box, Clock3, MessageCircle, PackageCheck, Search } from "lucide-react";
 import type { LockerOrder } from "@/lib/seller";
-import { money, whatsapp } from "@/lib/catalog";
+import { money, statuses, whatsapp } from "@/lib/catalog";
 import { action, message, readLocal, savedLocks } from "./client";
 import { Footer, Header, Notice } from "./common";
 
@@ -56,7 +56,7 @@ export function Locker() {
             <div><p className="eyebrow">{order.storeName} / {order.code}</p><h2>{order.title}</h2><p>{money(order.total)}</p>
               <span className={`badge badge-${pending ? "pending_verification" : "hold_box"}`}>
                 {pending ? <Clock3 size={13} strokeWidth={1.5} /> : <PackageCheck size={13} strokeWidth={1.5} />}
-                {pending ? "Payment under review" : `${days} ${days === 1 ? "day" : "days"} left in Hold Box`}</span>
+                {pending ? statuses.PENDING_VERIFICATION : `${days} ${days === 1 ? "day" : "days"} left in Hold Box`}</span>
               {!pending && (order.dispatchRequestedAt ? <a className="button" href={whatsapp(order.sellerPhone, `Hi, I requested dispatch for my LockDulu Hold Box. Order ${order.id} (${order.code}).`)} target="_blank" rel="noreferrer">
                 <MessageCircle size={17} strokeWidth={1.5} /> Dispatch requested · Message seller</a>
                 : <button type="button" className="button" disabled={!!dispatching} onClick={() => dispatch(order)}>{dispatching === order.id ? "Requesting…" : "Request combined dispatch"}</button>)}

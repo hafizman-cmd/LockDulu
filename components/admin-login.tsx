@@ -15,8 +15,8 @@ export function AdminLogin({ maxLength }: { maxLength: number }) {
       <div className="admin-password-row">
         <input id="admin-password" name="password" type={visible ? "text" : "password"} autoComplete="current-password"
           autoCapitalize="none" spellCheck={false} maxLength={maxLength} required />
-        <button type="button" className="button" aria-controls="admin-password" onClick={() => setVisible(!visible)}>
-          {visible ? <><EyeOff size={18} aria-hidden="true" /> Hide password</> : <><Eye size={18} aria-hidden="true" /> Show password</>}
+        <button type="button" className="icon-button" aria-controls="admin-password" aria-label={visible ? "Hide password" : "Show password"} onClick={() => setVisible(!visible)}>
+          {visible ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
         </button>
       </div>
     </div>

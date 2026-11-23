@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   ChevronLeft, ChevronRight, Clock3, Copy, Download, ImagePlus, LockKeyhole, MessageCircle, Package, Ruler, ShieldCheck, Truck,
 } from "lucide-react";
-import { grades, money, statuses, timer, whatsapp, type GarmentView, type Quote } from "@/lib/catalog";
+import { buyerStatus, grades, money, timer, whatsapp, type GarmentView, type Quote } from "@/lib/catalog";
 import type { readItem } from "@/lib/inventory";
 import { action, forgetLock, json, message, readLocal, RequestError, savedLocks, saveLock, upload, useClock, usePolling, writeLocal, type SavedLock } from "./client";
 import { Footer, GarmentPhoto, Header, Notice, Sheet, Stage } from "./common";
@@ -14,7 +14,7 @@ type ItemData = NonNullable<Awaited<ReturnType<typeof readItem>>>;
 type Delivery = { buyerName: string; buyerPhone: string; shippingAddress: string; fulfillmentType: "SHIP_NOW" | "HOLD_BOX" };
 type LockResponse = { quote: Quote; serverTime: number };
 type OrderState = { status: string; quote: Quote | null; code: string; serverTime: number };
-type Completed = { orderId: string; code: string; status: string };
+type Completed = { orderId: string; code: string; status: "PENDING_VERIFICATION" | "VERIFIED_PAID" | "REJECTED" };
 const defaultDelivery: Delivery = { buyerName: "", buyerPhone: "", shippingAddress: "", fulfillmentType: "SHIP_NOW" };
 const photoNames = ["Front", "Back", "Tag"];
 const deliveryKey = "lockdulu.delivery";
@@ -112,6 +112,9 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
         setDone({ orderId: stored.orderId!, code: result.code, status: result.status }); setOpen(true);
       } else if (result.status === "EXPIRED" || result.status === "REJECTED") {
         forgetLock(stored.token); setActive(null);
+        if (result.status === "REJECTED") {
+          setDone({ orderId: stored.orderId!, code: result.code, status: result.status }); setOpen(true);
+        }
       }
     }).catch(() => {});
     return () => aborter.abort();
@@ -122,16 +125,46 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
   const remaining = Math.max(0, quoteUntil - now);
   const expired = !!quote && !remaining && !done;
   const isAvailable = item.status === "AVAILABLE" && item.locksOpen;
-  const ownPending = !!active?.submitted && !!done;
+  const canViewOrder = !!active?.submitted && !!done;
   const running = !!quote && !expired && !done;
 
   useEffect(() => { if (expired) void refresh(); }, [expired, refresh]);
   const itemLockExpired = itemUntil > 0 && itemUntil <= now;
   useEffect(() => { if (itemLockExpired) void refresh(); }, [itemLockExpired, refresh]);
 
+  useEffect(() => {
+    if (done?.status !== "PENDING_VERIFICATION" || !active) return;
+    const aborter = new AbortController();
+    const order = done;
+    const token = active.token;
+    let checking = false;
+    async function checkPayment() {
+      if (checking || document.visibilityState === "hidden") return;
+      checking = true;
+      try {
+        const { status } = await action<OrderState>("order", { id: order.orderId, token }, aborter.signal);
+        if (aborter.signal.aborted || (status !== "VERIFIED_PAID" && status !== "REJECTED")) return;
+        setDone({ ...order, status });
+        if (status === "REJECTED") {
+          forgetLock(token); setActive(null); setQuote(null);
+        }
+        void refresh();
+      } catch { /* Keep the last known status until the next check. */ }
+      finally { checking = false; }
+    }
+    const check = () => void checkPayment();
+    const interval = window.setInterval(check, 4000);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      aborter.abort();
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [active, done, refresh]);
+
   async function startLock() {
     setError("");
-    if (running || ownPending) { setOpen(true); return; }
+    if (running || canViewOrder) { setOpen(true); return; }
     const retry = active && !active.submitted && !active.lockedUntil;
     const saved: SavedLock = retry ? active : {
       itemId: id, token: Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, "0")).join(""),
@@ -172,9 +205,9 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
     form.set("delivery", JSON.stringify(delivery));
     setBusy(true); setError("");
     try {
-      const result = await upload<{ orderId: string; code: string }>("receipt", form);
+      const result = await upload<Completed>("receipt", form);
       const submitted = { ...active, submitted: true };
-      saveLock(submitted); setActive(submitted); setDone({ ...result, status: "PENDING_VERIFICATION" }); setFile(null);
+      saveLock(submitted); setActive(submitted); setDone(result); setFile(null);
       void refresh();
     } catch (exception) { setError(message(exception)); }
     finally { setBusy(false); }
@@ -191,7 +224,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
       <div className="detail-grid">
         <Gallery item={item} />
         <div className="detail-copy">
-          <div className="detail-top"><span className="eyebrow">{item.code} / {item.category}</span><Stage item={item} now={now} /></div>
+          <div className="detail-top"><span className="eyebrow">{item.code} / {item.category}</span><Stage item={item} now={now} buyer /></div>
           <h1>{item.title}</h1><p className="muted">{item.brand}</p>
           <div className="detail-price">{money(item.price)}</div>
           <div className="condition surface"><h2>{grades[item.conditionGrade]}</h2><p>{item.conditionNotes || "No additional condition notes."}</p></div>
@@ -203,16 +236,17 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
     <Footer storeName={data.store.storeName} />
     <div className="item-cta glass">
       <div className="wrap cta-inner">
-        <div className="cta-info"><b>{money(item.price)}</b><span>{lockedByAnother ? `Locked by another buyer · releases in ${timer(itemUntil - now)}` : !item.locksOpen ? "Locks open when the drop goes live" : item.status === "AVAILABLE" || running ? "10-minute reservation" : statuses[item.status]}</span></div>
-        <button className="button primary" onClick={startLock} disabled={busy || (!isAvailable && !running && !ownPending && !canRetry)}>
-          <LockKeyhole size={18} strokeWidth={1.5} />{busy ? "Working…" : ownPending ? "View order" : running ? "Resume checkout" : canRetry ? "Recover checkout" : isAvailable ? "Lock Item (10:00)" : lockedByAnother ? "Currently locked" : item.locksOpen ? statuses[item.status] : "Preview only"}
+        <div className="cta-info"><b>{money(item.price)}</b><span>{lockedByAnother ? `Locked by another buyer · releases in ${timer(itemUntil - now)}` : running ? "10-minute reservation" : item.status === "AVAILABLE" ? (item.locksOpen ? "10-minute reservation" : "Locks open when the drop goes live") : buyerStatus(item.status)}</span></div>
+        <button className="button primary" onClick={startLock} disabled={busy || (!isAvailable && !running && !canViewOrder && !canRetry)}>
+          <LockKeyhole size={18} strokeWidth={1.5} />{busy ? "Working…" : canViewOrder ? "View order" : running ? "Resume checkout" : canRetry ? "Recover checkout" : isAvailable ? "Lock Item (10:00)" : lockedByAnother ? "Currently locked" : item.status === "AVAILABLE" ? "Preview only" : buyerStatus(item.status)}
         </button>
         {!open && error && <Notice>{error}</Notice>}
       </div>
     </div>
-    {open && (quote || done) && <Sheet title={done ? "Payment receipt received" : "Checkout"} onClose={() => { if (!busy) { setOpen(false); setError(""); } }}>
+    {open && (quote || done) && <Sheet title={done?.status === "VERIFIED_PAID" ? "Payment confirmed" : done?.status === "REJECTED" ? "Payment receipt rejected" : done ? "Payment receipt received" : "Checkout"} onClose={() => { if (!busy) { setOpen(false); setError(""); } }}>
       {done ? <div className="stack">
-        <div className="receipt-success"><ShieldCheck size={31} strokeWidth={1.5} /><p>{done.status === "VERIFIED_PAID" ? "The seller confirmed your payment." : "The seller will review your transfer. Your piece is reserved while payment is checked."}</p></div>
+        {done.status === "REJECTED" ? <Notice>The seller could not verify your payment. Contact the seller if you already paid.</Notice> :
+          <div className="receipt-success" role="status"><ShieldCheck size={31} strokeWidth={1.5} /><p>{done.status === "VERIFIED_PAID" ? "The seller confirmed your payment." : "The seller will review your transfer. Your piece is reserved while payment is checked."}</p></div>}
         <div className="order-ref"><span>{done.code}</span><strong>{done.orderId}</strong></div>
         <a className="button primary" href={whatsapp(data.store.whatsappNumber, `Hi, I submitted a LockDulu receipt for order ${done.orderId} (${done.code}).`)} target="_blank" rel="noreferrer"><MessageCircle size={18} strokeWidth={1.5} /> Message Seller on WhatsApp</a>
         <Link className="button" href="/locker">Open My Hold Box</Link>

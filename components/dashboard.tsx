@@ -234,7 +234,7 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
       </div>
     </Sheet>}
     {!held && decision && <Sheet title={decision.type === "ship" ? "Mark parcel shipped?" : decision.paid ? "Confirm payment?" : "Reject this receipt?"} onClose={() => { if (!busy) setDecision(null); }}>
-      <div className="stack"><p>{decision.type === "ship" ? `Mark ${decision.ids.length} ${decision.ids.length === 1 ? "piece" : "pieces"} shipped for ${decision.buyer}.` : decision.paid ? `Confirm the DuitNow transfer for ${decision.code}.` : `${decision.code} will be available for another buyer immediately.`}</p>
+      <div className="stack"><p>{decision.type === "ship" ? `Mark ${decision.ids.length} ${decision.ids.length === 1 ? "piece" : "pieces"} shipped for ${decision.buyer}.` : decision.paid ? `Confirm ${decision.code} after checking that the DuitNow transfer reached your bank or eWallet. The listing will show as sold out.` : `${decision.code} will be available for another buyer immediately.`}</p>
         <div className="button-row"><button className="button" disabled={busy} onClick={() => setDecision(null)}>Cancel</button><button className="button primary" disabled={busy} onClick={confirm}>{busy ? "Saving…" : decision.type === "ship" ? "Mark shipped" : decision.paid ? "Confirm Paid" : "Reject / Unpaid"}</button></div></div>
     </Sheet>}
     {receiptOpen && <Sheet title="Payment receipt" className="image-sheet" onClose={() => setReceiptOpen(null)}><img src={`/api/receipt/${receiptOpen}`} alt="High-resolution payment receipt" /></Sheet>}

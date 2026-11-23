@@ -48,4 +48,6 @@ Set `ADMIN_PASSWORD` to a unique password of 12 to 256 characters in your privat
 
 Restart the local server and open `/admin/dashboard`. Sign in to see platform totals and manage shops. Admin sessions expire after eight hours. Changing `ADMIN_PASSWORD` invalidates existing admin sessions once the new setting takes effect.
 
+Confirmed orders count payments that sellers have verified. Pending receipts appear under **Payments awaiting review**. A lock expires after ten minutes if no receipt is submitted. Once a receipt is submitted, the storefront shows **Awaiting payment approval** until the seller approves it and the garment shows as **Sold out**, or rejects it and the garment becomes available again.
+
 Run `npm run db:migrate` on the target database before deploying shop moderation. In **Manage shops**, use **Hold** to hide a storefront and its listings and make the seller dashboard read-only. **Resume** restores access. **Delete** permanently removes the storefront from the app and disables seller sign-in. The database keeps the shop's order history and reserves its handle. Hold and Delete are both blocked while any buyer garment lock is active.

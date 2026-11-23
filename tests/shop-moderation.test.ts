@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { adminOverview, moderateShop } from "../lib/admin.ts";
 import { db } from "../lib/db.ts";
 import { lockItem, orderState, readItem, readStore, reviewOrder, submitReceipt } from "../lib/inventory.ts";
+import { buyerStatus } from "../lib/catalog.ts";
 import { dashboardData, deleteGarment, listGarment, lockerLookup, markShipped, requestDispatch, updateSettings } from "../lib/seller.ts";
 import { readShopDirectory } from "../lib/shop-directory.ts";
 import { requireActiveSeller } from "../lib/shop-status.ts";
@@ -39,6 +40,10 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
     const token = "a".repeat(64);
     const { quote } = await lockItem(garment.id, token);
 
+    let overview = await adminOverview(1);
+    assert.equal(overview.orders, 0);
+    assert.equal(overview.shopRows.find(row => row.id === shop.id)?._count.orders, 0);
+
     await assert.rejects(moderateShop(shop.id, "hold"), /active garment lock/);
     await assert.rejects(moderateShop(shop.id, "delete"), /active garment lock/);
     assert.equal((await orderState(quote.orderId, token)).quote?.orderId, quote.orderId);
@@ -47,6 +52,15 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
 
     const delivery = { buyerName: "Test buyer", buyerPhone: phone, shippingAddress: "A test address", fulfillmentType: "HOLD_BOX" } as const;
     await submitReceipt(quote.orderId, token, delivery, "test-receipt.bin");
+    overview = await adminOverview(1);
+    assert.equal(overview.orders, 0);
+    assert.equal(overview.pendingReviews, 1);
+    assert.equal(overview.shopRows.find(row => row.id === shop.id)?._count.orders, 0);
+    const pending = (await readItem(garment.id))?.item;
+    assert.equal(pending?.status, "PENDING_VERIFICATION");
+    assert.equal(pending?.lockedUntil, null);
+    assert.equal(buyerStatus(pending.status), "Awaiting payment approval");
+    await assert.rejects(lockItem(garment.id, "d".repeat(64)), { status: 409 });
     assert.equal((await lockerLookup(phone, [token])).length, 1);
     await db().garment.update({ where: { id: available.id }, data: { status: "LOCKED", lockedUntil: new Date(Date.now() - 5_000) } });
     await moderateShop(shop.id, "hold");
@@ -73,6 +87,26 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
     assert.equal((await readItem(available.id))?.item.status, "AVAILABLE");
     assert.equal((await lockerLookup(phone, [token])).length, 1);
     await updateSettings(shop.id, settings);
+    await reviewOrder(shop.id, quote.orderId, false);
+    overview = await adminOverview(1);
+    assert.equal(overview.orders, 0);
+    assert.equal(overview.pendingReviews, 0);
+    assert.equal((await orderState(quote.orderId, token)).status, "REJECTED");
+    assert.equal((await readItem(garment.id))?.item.status, "AVAILABLE");
+
+    const secondToken = "e".repeat(64);
+    const confirmed = await lockItem(garment.id, secondToken);
+    await submitReceipt(confirmed.quote.orderId, secondToken, delivery, "test-receipt.bin");
+    await reviewOrder(shop.id, confirmed.quote.orderId, true);
+    await assert.rejects(reviewOrder(shop.id, confirmed.quote.orderId, true), { status: 409 });
+    assert.equal((await orderState(confirmed.quote.orderId, secondToken)).status, "VERIFIED_PAID");
+    const placed = (await readItem(garment.id))?.item;
+    assert.equal(placed?.status, "HOLD_BOX");
+    assert.equal(buyerStatus(placed.status), "Sold out");
+    overview = await adminOverview(1);
+    assert.equal(overview.orders, 1);
+    assert.equal(overview.shopRows.find(row => row.id === shop.id)?._count.orders, 1);
+    assert.equal(overview.pendingReviews, 0);
 
     // Whichever write wins, moderation and a live lock cannot coexist.
     const [buyer, moderator] = await Promise.allSettled([

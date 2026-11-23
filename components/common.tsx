@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Box, Check, Clock3, LockKeyhole, Menu, Moon, Sun, Tag, X } from "lucide-react";
-import { grades, statuses, timer, type GarmentView } from "@/lib/catalog";
+import { buyerStatus, grades, statuses, timer, type GarmentView } from "@/lib/catalog";
 import { readLocal, savedLocks, writeLocal, type SavedLock } from "./client";
 
 export function Brand() {
@@ -59,12 +59,13 @@ export function GarmentPhoto({ src, alt, className, loading, onUnavailable }: {
   return <img src={src} alt={alt} className={className} loading={loading} draggable={false} onError={() => { setFailedSrc(src); onUnavailable?.(); }} />;
 }
 
-export function Stage({ item, now, showCondition = false }: { item: GarmentView; now: number; showCondition?: boolean }) {
+export function Stage({ item, now, showCondition = false, buyer = false }: { item: GarmentView; now: number; showCondition?: boolean; buyer?: boolean }) {
   const remaining = item.lockedUntil ? new Date(item.lockedUntil).getTime() - now : 0;
   const label = item.status === "LOCKED" ? `Locked · ${timer(remaining)}`
     : item.status === "AVAILABLE" && !item.locksOpen ? "Preview"
-    : item.status === "AVAILABLE" && showCondition ? grades[item.conditionGrade] : statuses[item.status];
-  return <span className={`badge badge-${item.status.toLowerCase()}`}>
+    : item.status === "AVAILABLE" && showCondition ? grades[item.conditionGrade] : buyer ? buyerStatus(item.status) : statuses[item.status];
+  const badgeStatus = buyer && item.status === "HOLD_BOX" ? "SOLD" : item.status;
+  return <span className={`badge badge-${badgeStatus.toLowerCase()}`}>
     {item.status === "LOCKED" && <LockKeyhole size={12} strokeWidth={1.5} />}
     {item.status === "PENDING_VERIFICATION" && <Clock3 size={12} strokeWidth={1.5} />}
     {label}

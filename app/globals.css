@@ -251,7 +251,6 @@ input[type="radio"],input[type="checkbox"] { accent-color: var(--olive); }
 .lookup { max-width: 520px; margin-bottom: .9rem; }
 .admin-password-field { gap: .32rem; }
 .admin-password-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; }
-.admin-password-row .button { white-space: nowrap; }
 .admin-password-row input::-ms-reveal { display: none; }
 .admin-heading { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: .75rem; margin-bottom: 1rem; }
 .admin-heading .section-intro { margin: 0; }
@@ -267,6 +266,7 @@ input[type="radio"],input[type="checkbox"] { accent-color: var(--olive); }
 .admin-shops th, .admin-shops td { text-align: left; padding: .65rem .5rem; border-bottom: 1px solid var(--border); }
 .admin-shops thead th { background: var(--soft); color: var(--muted-readable); }
 .admin-shops td { white-space: nowrap; }
+.admin-shops dialog { white-space: normal; overflow-wrap: anywhere; }
 .admin-shops tbody th { min-width: 9rem; overflow-wrap: anywhere; }
 .admin-shops tbody a:hover { text-decoration: underline; }
 .admin-shops tbody a svg { display: inline; vertical-align: text-bottom; }

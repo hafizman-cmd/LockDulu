@@ -3,13 +3,14 @@ import { HttpError } from "./http.ts";
 import { existingShop } from "./shop-status.ts";
 
 const shopsPerPage = 20;
+const confirmedOrder = { paymentStatus: "VERIFIED_PAID" } as const;
 
 export async function adminOverview(requestedPage: number) {
   const database = db();
   const [shops, listings, orders, pendingReviews] = await Promise.all([
     database.seller.count({ where: existingShop }),
     database.garment.count({ where: { seller: existingShop } }),
-    database.order.count({ where: { seller: existingShop } }),
+    database.order.count({ where: { seller: existingShop, ...confirmedOrder } }),
     database.order.count({ where: { seller: existingShop, paymentStatus: "PENDING_VERIFICATION" } }),
   ]);
   const pageCount = Math.max(1, Math.ceil(shops / shopsPerPage));
@@ -20,7 +21,7 @@ export async function adminOverview(requestedPage: number) {
     take: shopsPerPage,
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     select: { id: true, storeName: true, storeSlug: true, createdAt: true, status: true,
-      _count: { select: { garments: true, orders: true } } },
+      _count: { select: { garments: true, orders: { where: confirmedOrder } } } },
   });
   return { shops, listings, orders, pendingReviews, shopRows, page, pageCount };
 }

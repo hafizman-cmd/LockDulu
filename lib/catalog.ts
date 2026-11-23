@@ -10,10 +10,14 @@ export const grades = {
 export const statuses = {
   AVAILABLE: "Available",
   LOCKED: "Locked",
-  PENDING_VERIFICATION: "Payment under review",
+  PENDING_VERIFICATION: "Awaiting payment approval",
   HOLD_BOX: "Hold Box",
   SOLD: "Sold",
 } satisfies Record<GarmentStatus, string>;
+
+export function buyerStatus(status: GarmentStatus) {
+  return status === "SOLD" || status === "HOLD_BOX" ? "Sold out" : statuses[status];
+}
 
 export type Pin = { x: number; y: number; note: string; photo?: "front" | "back" };
 export type GarmentView = {

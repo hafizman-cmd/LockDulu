@@ -84,7 +84,7 @@ export function Storefront({ initial }: { initial: StoreData }) {
         {visible.length ? <div className="garment-grid">
           {visible.map(item => <Link key={item.id} href={`/item/${item.id}`} className="garment-card" aria-label={`${item.title}, ${money(item.price)}, ${measurements(item)}`}>
             <GarmentPhoto className="card-photo" src={item.images[0]} alt={item.title} loading="lazy" />
-            <div className="card-meta"><div className="card-row"><strong>{money(item.price)}</strong><Stage item={item} now={now} showCondition /></div><p><span>{item.category === "Pants" ? "Waist × Outseam" : "Pit × Labuh"}</span><b>{measurements(item)}</b></p></div>
+            <div className="card-meta"><div className="card-row"><strong>{money(item.price)}</strong><Stage item={item} now={now} showCondition buyer /></div><p><span>{item.category === "Pants" ? "Waist × Outseam" : "Pit × Labuh"}</span><b>{measurements(item)}</b></p></div>
           </Link>)}
         </div> : <div className="empty surface"><Globe2 size={25} strokeWidth={1.5} /><h3>No matching pieces</h3><p>Change the category or adjust your My Fit range.</p></div>}
       </section>

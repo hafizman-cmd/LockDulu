@@ -33,7 +33,7 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
   const metrics = [
     { label: "Registered shops", value: overview.shops, icon: Store },
     { label: "Listings", value: overview.listings, icon: Tag },
-    { label: "Orders", value: overview.orders, icon: ReceiptText },
+    { label: "Confirmed orders", value: overview.orders, icon: ReceiptText },
     { label: "Payments awaiting review", value: overview.pendingReviews, icon: ShieldCheck },
   ];
 
@@ -61,7 +61,7 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
         <h2 id="manage-shops"><LayoutGrid size={20} aria-hidden="true" /> Manage shops</h2>
         {overview.shopRows.length ? <div className="admin-table-scroll" role="region" aria-label="Shops table" tabIndex={0}>
           <table>
-            <thead><tr><th scope="col">Shop</th><th scope="col">Joined</th><th scope="col">Listings</th><th scope="col">Orders</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+            <thead><tr><th scope="col">Shop</th><th scope="col">Joined</th><th scope="col">Listings</th><th scope="col">Confirmed orders</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
             <tbody>{overview.shopRows.map(shop => <tr key={shop.id}>
               <th scope="row">
                 {shop.status === "HELD" ? shop.storeName : <Link href={`/${shop.storeSlug}`}>
