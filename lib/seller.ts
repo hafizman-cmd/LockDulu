@@ -58,6 +58,19 @@ export async function listGarment(sellerId: string, data: z.infer<typeof listing
   });
 }
 
+export async function deleteGarment(sellerId: string, garmentId: string) {
+  await releaseExpired({ sellerId });
+  return writeTransaction(async tx => {
+    const deleted = await tx.garment.deleteMany({
+      where: { id: garmentId, sellerId, status: "AVAILABLE", orderItem: null },
+    });
+    if (deleted.count) return { ok: true };
+    const item = await tx.garment.findFirst({ where: { id: garmentId, sellerId }, select: { id: true } });
+    if (!item) throw new HttpError("This listing could not be found.", 404);
+    throw new HttpError("This listing cannot be deleted while it has an active lock or an associated order.", 409);
+  });
+}
+
 export async function updateSettings(sellerId: string, data: z.infer<typeof settings>) {
   await db().seller.update({ where: { id: sellerId }, data });
   return { ok: true };

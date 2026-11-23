@@ -3,7 +3,7 @@ import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  Box, Check, ChevronDown, ExternalLink, ImagePlus, LayoutGrid, LogOut, PackageCheck, Plus, QrCode, ReceiptText, Settings, ShieldCheck, X,
+  Box, Check, ChevronDown, ExternalLink, ImagePlus, LayoutGrid, LogOut, PackageCheck, Plus, QrCode, ReceiptText, Settings, ShieldCheck, Trash2, X,
 } from "lucide-react";
 import { measurements, money, statuses, whatsapp } from "@/lib/catalog";
 import type { DashboardData } from "@/lib/seller";
@@ -59,6 +59,7 @@ export function Dashboard({ initial }: { initial: DashboardData }) {
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState(false);
   const [receiptOpen, setReceiptOpen] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<{ id: string; code: string; title: string } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -136,9 +137,10 @@ export function Dashboard({ initial }: { initial: DashboardData }) {
         <div className="section-heading"><div><h2>Live inventory</h2><p className="muted">Track one-of-one pieces and their current locks.</p></div><span className="piece-count">{visible.length} pieces</span></div>
         <div className="surface inventory-filters"><label>Search inventory<input value={query} onChange={event => setQuery(event.target.value)} placeholder="Item name or code" /></label>
           <label>Status<select value={filter} onChange={event => setFilter(event.target.value)}><option value="all">All statuses</option>{Object.entries(statuses).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></div>
-        <div className="surface inventory-list">{visible.map(item => <Link href={`/item/${item.id}`} className="inventory-item" key={item.id}>
+        <div className="surface inventory-list">{visible.map(item => <div className="inventory-row" key={item.id}><Link href={`/item/${item.id}`} className="inventory-item">
           <img src={item.images[0]} alt="" /><div><span className="eyebrow">{item.code}</span><strong>{item.title}</strong><small>{measurements(item)}</small></div><div><strong>{money(item.price)}</strong><Stage item={item} now={now} /></div>
-        </Link>)}{visible.length === 0 && <p className="empty">No pieces match this filter.</p>}</div>
+        </Link><button type="button" className="icon-button inventory-delete" aria-label={`Delete ${item.code} ${item.title}`}
+          onClick={() => setDeleting({ id: item.id, code: item.code, title: item.title })}><Trash2 size={18} strokeWidth={1.5} /></button></div>)}{visible.length === 0 && <p className="empty">No pieces match this filter.</p>}</div>
       </section>}
       {tab === "hold" && <section className="dash-section stack">
         <div className="section-heading"><div><h2>Hold Box fulfillment</h2><p className="muted">Pack verified pieces together by buyer.</p></div><span className="piece-count">{groups.size} buyers</span></div>
@@ -165,6 +167,20 @@ export function Dashboard({ initial }: { initial: DashboardData }) {
     {listing && <QuickList data={data} onClose={() => setListing(false)} onListed={async code => {
       setListing(false); setTab("inventory"); setFilter("all"); setQuery(""); setError(""); setSuccess(`${code} was listed.`); await refresh();
     }} />}
+    {deleting && <Sheet title="Delete listing?" onClose={() => { if (!busy) setDeleting(null); }}>
+      <div className="stack"><p>Delete {deleting.code} · {deleting.title}? This permanently removes the listing from your store.</p>
+        <p className="muted">Listings with an active lock or an associated order cannot be deleted.</p>
+        <div className="button-row"><button className="button" disabled={busy} onClick={() => setDeleting(null)}>Cancel</button>
+          <button className="button reject" disabled={busy} onClick={async () => {
+            setBusy(true); setError(""); setSuccess("");
+            try {
+              await action("deleteListing", { id: deleting.id });
+              setSuccess(`${deleting.code} was deleted.`);
+            } catch (exception) { setError(message(exception)); }
+            finally { setDeleting(null); await refresh(); setBusy(false); }
+          }}>{busy ? "Deleting…" : "Delete listing"}</button></div>
+      </div>
+    </Sheet>}
     {decision && <Sheet title={decision.type === "ship" ? "Mark parcel shipped?" : decision.paid ? "Confirm payment?" : "Reject this receipt?"} onClose={() => { if (!busy) setDecision(null); }}>
       <div className="stack"><p>{decision.type === "ship" ? `Mark ${decision.ids.length} ${decision.ids.length === 1 ? "piece" : "pieces"} shipped for ${decision.buyer}.` : decision.paid ? `Confirm the DuitNow transfer for ${decision.code}.` : `${decision.code} will be available for another buyer immediately.`}</p>
         <div className="button-row"><button className="button" disabled={busy} onClick={() => setDecision(null)}>Cancel</button><button className="button primary" disabled={busy} onClick={confirm}>{busy ? "Saving…" : decision.type === "ship" ? "Mark shipped" : decision.paid ? "Confirm Paid" : "Reject / Unpaid"}</button></div></div>

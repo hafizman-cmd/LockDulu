@@ -23,7 +23,10 @@ export const listing = z.object({
   conditionGrade: z.enum(Object.keys(grades) as [keyof typeof grades, ...(keyof typeof grades)[]]),
   conditionNotes: z.string().trim().max(1000),
   images: z.array(assetUrl).min(1).max(3),
-  flawPins: z.array(z.object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100), note: z.string().trim().min(1).max(180) })).max(12),
+  flawPins: z.array(z.object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100), note: z.string().trim().min(1).max(180), photo: z.enum(["front", "back"]).optional() })).max(12),
+}).refine(value => value.images.length > 1 || !value.flawPins.some(pin => pin.photo === "back"), {
+  message: "Add a back photo before marking back flaws.",
+  path: ["flawPins"],
 });
 export const settings = z.object({
   qrCodeUrl: z.union([assetUrl, z.literal("/sample/duitnow.svg")]),

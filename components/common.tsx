@@ -72,7 +72,10 @@ export function Sheet({ title, children, onClose, className = "" }: {
     return () => { element.close(); document.body.style.overflow = previous; };
   }, []);
   return <dialog ref={dialog} aria-label={title} className={`sheet glass ${className}`}
-    onCancel={event => { event.preventDefault(); onClose(); }}
+    onCancel={event => {
+      if (event.target !== event.currentTarget) return;
+      event.preventDefault(); onClose();
+    }}
     onClick={event => {
       if (event.target !== dialog.current) return;
       const box = event.currentTarget.getBoundingClientRect();

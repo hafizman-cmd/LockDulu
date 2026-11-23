@@ -5,7 +5,7 @@ import { HttpError, limitBody, requireOrigin, respond } from "@/lib/http";
 import { lockItem, orderState, reviewOrder } from "@/lib/inventory";
 import { checkPassword } from "@/lib/password";
 import { currentSeller, sellerSession, sessionCookie, sessionSeconds } from "@/lib/security";
-import { dashboardData, listGarment, lockerLookup, markShipped, requestDispatch, updateSettings } from "@/lib/seller";
+import { dashboardData, deleteGarment, listGarment, lockerLookup, markShipped, requestDispatch, updateSettings } from "@/lib/seller";
 import { id, listing, phone, settings, token } from "@/lib/validation";
 
 const attempts = new Map<string, { count: number; until: number }>();
@@ -59,6 +59,7 @@ export async function POST(request: Request) {
       }
       case "review": return reviewOrder(seller, id.parse(body.id), z.boolean().parse(body.paid));
       case "list": return listGarment(seller, listing.parse(body.listing), id.nullable().parse(body.dropId));
+      case "deleteListing": return deleteGarment(seller, id.parse(body.id));
       case "settings": return updateSettings(seller, settings.parse(body.settings));
       case "ship": return markShipped(seller, [...new Set(z.array(id).min(1).max(200).parse(body.ids))]);
       default: throw new HttpError("Unknown action.", 404);

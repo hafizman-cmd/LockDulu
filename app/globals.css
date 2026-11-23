@@ -183,8 +183,9 @@ input[type="radio"],input[type="checkbox"] { accent-color: var(--olive); }
 .item-page { padding-block: 1.05rem 2.5rem; }
 .breadcrumb { display: inline-flex; align-items: center; gap: .42rem; min-height: 39px; margin-bottom: .45rem; font-weight: 650; font-size: .87rem; }
 .detail-grid, .detail-copy { display: grid; gap: 1rem; align-content: start; min-width: 0; }
-.gallery-main { position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; touch-action: pan-y; background: var(--soft); }
-.gallery-main > img { width: 100%; user-select: none; }
+.gallery-main { position: relative; aspect-ratio: 1; container-type: size; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; touch-action: pan-y; background: var(--soft); }
+.gallery-photo { position: relative; }
+.gallery-photo img { max-width: 100cqw; max-height: 100cqh; user-select: none; }
 .gallery-arrows { position: absolute; bottom: .55rem; right: .55rem; display: flex; gap: .3rem; }
 .gallery-arrows .icon-button { box-shadow: 0 2px 8px #0002; }
 .flaw-pin { display: grid; place-items: center; position: absolute; transform: translate(-50%, -50%); width: 31px; height: 31px; border-radius: 50%; background: #fffffff0; border: 1px solid #18181b; color: #18181b; font-weight: 750; font-size: .78rem; box-shadow: 0 1px 6px #0004; }
@@ -254,6 +255,10 @@ input[type="radio"],input[type="checkbox"] { accent-color: var(--olive); }
 .order-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; }
 .order-actions > .button { flex: 1 1 auto; }
 .inventory-filters { display: grid; grid-template-columns: 1.4fr 1fr; gap: .6rem; padding: .7rem; }
+.inventory-row { display: flex; align-items: center; }
+.inventory-row + .inventory-row { border-top: 1px solid var(--border); }
+.inventory-row .inventory-item { flex: 1; min-width: 0; }
+.inventory-delete { margin-right: .6rem; color: var(--rust); }
 .inventory-item { display: grid; grid-template-columns: 43px minmax(0, 1fr) auto; padding: .55rem .6rem; align-items: center; gap: .55rem; }
 .inventory-item + .inventory-item { border-top: 1px solid var(--border); }
 .inventory-item img { width: 43px; aspect-ratio: 4 / 5; object-fit: cover; border-radius: 5px; }

@@ -15,7 +15,7 @@ export const statuses = {
   SOLD: "Sold",
 } satisfies Record<GarmentStatus, string>;
 
-export type Pin = { x: number; y: number; note: string };
+export type Pin = { x: number; y: number; note: string; photo?: "front" | "back" };
 export type GarmentView = {
   id: string; code: string; title: string; brand: string; category: GarmentCategory;
   price: string; pitInches: number; lengthInches: number; conditionGrade: ConditionGrade;

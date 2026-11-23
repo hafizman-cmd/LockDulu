@@ -27,6 +27,7 @@ export function QuickList({ data, onClose, onListed }: { data: DashboardData; on
   const [uploading, setUploading] = useState(0);
   const [pins, setPins] = useState<Pin[]>([]);
   const [activePin, setActivePin] = useState<number | null>(null);
+  const [pinPhoto, setPinPhoto] = useState<"front" | "back">("front");
   const [pit, setPit] = useState("22");
   const [length, setLength] = useState("28");
   const [category, setCategory] = useState<string>("Tee");
@@ -38,7 +39,12 @@ export function QuickList({ data, onClose, onListed }: { data: DashboardData; on
     try {
       const url = await sendImage(file, "garment");
       setPhotos(current => current.map((photo, i) => i === index ? url : photo));
-      if (index === 0) { setPins([]); setActivePin(null); }
+      if (index < 2) {
+        const photo = index === 0 ? "front" : "back";
+        setPins(current => current.filter(pin => (pin.photo ?? "front") !== photo));
+        setActivePin(null);
+        if (index === 1 && !photos[0]) setPinPhoto("back");
+      }
     } catch (exception) { setError(message(exception)); } finally { setUploading(count => count - 1); }
   }
 
@@ -77,22 +83,29 @@ export function QuickList({ data, onClose, onListed }: { data: DashboardData; on
           }} />
         </label>)}
       </div></fieldset>
-      {photos[0] && <fieldset className="pin-editor">
+      {(photos[0] || photos[1]) && <fieldset className="pin-editor">
         <legend>Flaw pins</legend><p className="muted">Tap the image to mark a flaw and describe it below.</p>
+        <div className="grade-pills" aria-label="Photo to mark">
+          {(["front", "back"] as const).map((photo, i) => <button type="button" key={photo}
+            disabled={!photos[i]} aria-pressed={pinPhoto === photo} className={pinPhoto === photo ? "selected" : ""}
+            onClick={() => { setPinPhoto(photo); setActivePin(null); }}>{photo === "front" ? "Front" : "Back"}</button>)}
+        </div>
+        {photos[pinPhoto === "front" ? 0 : 1] && <>
         <div className="pin-canvas">
-          <button type="button" aria-label="Place a flaw pin on the front photo" onClick={event => {
+          <button type="button" aria-label={`Place a flaw pin on the ${pinPhoto} photo`} onClick={event => {
             if (pins.length >= 12) return;
             const bounds = event.currentTarget.getBoundingClientRect();
             const clamp = (value: number) => Math.round(Math.min(100, Math.max(0, value)) * 100) / 100;
             const x = event.detail ? clamp((event.clientX - bounds.left) / bounds.width * 100) : 50;
             const y = event.detail ? clamp((event.clientY - bounds.top) / bounds.height * 100) : 50;
-            setPins([...pins, { x, y, note: "" }]); setActivePin(pins.length);
-          }}><img src={photos[0]} alt="Front garment photo for marking flaws" /></button>
-          {pins.map((pin, i) => <button type="button" key={i} className="flaw-pin" aria-label={`Edit flaw ${i + 1}`} aria-pressed={activePin === i} style={{ left: `${pin.x}%`, top: `${pin.y}%` }} onClick={() => setActivePin(i)}>{i + 1}</button>)}
+            setPins([...pins, { x, y, note: "", photo: pinPhoto }]); setActivePin(pins.length);
+          }}><img src={photos[pinPhoto === "front" ? 0 : 1]!} alt={`${pinPhoto === "front" ? "Front" : "Back"} garment photo for marking flaws`} /></button>
+          {pins.map((pin, i) => (pin.photo ?? "front") === pinPhoto && <button type="button" key={i} className="flaw-pin" aria-label={`Edit flaw ${i + 1}`} aria-pressed={activePin === i} style={{ left: `${pin.x}%`, top: `${pin.y}%` }} onClick={() => setActivePin(i)}>{i + 1}</button>)}
         </div>
         {activePin !== null && pins[activePin] && <div className="pin-editor-field"><label>Flaw {activePin + 1} note<input required maxLength={180} value={pins[activePin].note}
           onChange={event => setPins(pins.map((pin, i) => i === activePin ? { ...pin, note: event.target.value } : pin))} /></label>
           <button className="icon-button" type="button" aria-label="Remove flaw pin" onClick={() => { setPins(pins.filter((_, i) => i !== activePin)); setActivePin(null); }}><Trash2 size={18} strokeWidth={1.5} /></button></div>}
+        </>}
       </fieldset>}
       {error && <Notice>{error}</Notice>}
       <button className="button primary" disabled={busy || !!uploading}>{busy ? "Listing…" : uploading ? "Uploading photo…" : "Publish garment"}</button>

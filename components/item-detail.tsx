@@ -30,9 +30,11 @@ function Gallery({ item }: { item: GarmentView }) {
         const dx = event.changedTouches[0].clientX - touchdown.current;
         if (Math.abs(dx) > 48) go(index + (dx < 0 ? 1 : -1));
       }}>
-      <img src={item.images[index]} alt={`${item.title} · ${photoNames[index] ?? "Photo"}`} draggable={false} />
-      {index === 0 && item.flawPins.map((point, i) => <button key={i} className="flaw-pin" style={{ left: `${point.x}%`, top: `${point.y}%` }}
-        aria-label={`View flaw ${i + 1}`} aria-pressed={i === pin} onClick={() => setPin(pin === i ? null : i)}>{i + 1}</button>)}
+      {item.images[index] ? <div className="gallery-photo">
+        <img src={item.images[index]} alt={`${item.title} · ${photoNames[index] ?? "Photo"}`} draggable={false} />
+        {index < 2 && item.flawPins.map((point, i) => (point.photo ?? "front") === (index === 0 ? "front" : "back") && <button key={i} className="flaw-pin" style={{ left: `${point.x}%`, top: `${point.y}%` }}
+          aria-label={`View flaw ${i + 1}`} aria-pressed={i === pin} onClick={() => setPin(pin === i ? null : i)}>{i + 1}</button>)}
+      </div> : <p className="muted">No photo available</p>}
       {item.images.length > 1 && <div className="gallery-arrows">
         <button className="icon-button" aria-label="Previous photo" onClick={() => go(index - 1)}><ChevronLeft size={20} strokeWidth={1.5} /></button>
         <button className="icon-button" aria-label="Next photo" onClick={() => go(index + 1)}><ChevronRight size={20} strokeWidth={1.5} /></button>
