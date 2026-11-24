@@ -198,12 +198,18 @@ input[type="radio"],input[type="checkbox"] { accent-color: var(--olive); }
 .delivery-options label:has(:checked) { border-color: var(--olive); }
 .qr-card { display: grid; grid-template-columns: 108px minmax(0, 1fr); align-items: center; gap: .8rem; padding: .6rem; }
 .qr-card img { width: 100%; object-fit: contain; background: #fff; border-radius: 4px; }
+.qr-card.qr-expanded { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; }
+.qr-card.qr-expanded img { max-width: 320px; }
 .qr-card div { display: grid; gap: .25rem; }
 .qr-card div > p { color: var(--muted-readable); font-size: .86rem; }
 .qr-card div > b { font-size: 1.5rem; }
 .receipt-success { display: flex; align-items: center; gap: .7rem; background: var(--olive-tint); color: var(--olive); padding: .85rem; border-radius: 10px; }
 .order-ref { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: .25rem .5rem; background: var(--soft); border-radius: 8px; padding: .6rem .75rem; font-size: .83rem; }
 .order-ref strong, .order-copy code { overflow-wrap: anywhere; }
+.order-reference { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .35rem .5rem; align-items: end; margin-bottom: .45rem; }
+.order-reference p { grid-column: 1 / -1; font-size: .85rem; }
+.order-reference p:empty { display: none; }
+.order-reference input { font-family: ui-monospace, monospace; }
 .item-page { padding-block: 1.05rem 2.5rem; }
 .breadcrumb { display: inline-flex; align-items: center; gap: .42rem; min-height: 39px; margin-bottom: .45rem; font-weight: 650; font-size: .87rem; }
 .detail-grid, .detail-copy { display: grid; gap: 1rem; align-content: start; min-width: 0; }
@@ -280,10 +286,14 @@ input[type="radio"],input[type="checkbox"] { accent-color: var(--olive); }
 .admin-pagination { justify-content: end; margin-top: .75rem; }
 .locker-results { margin-top: 1rem; }
 .locker-order { display: grid; grid-template-columns: 69px minmax(0, 1fr); gap: .7rem; padding: .75rem; }
-.locker-order img { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; border-radius: 6px; }
 .locker-order h2 { font-size: 1.1rem; }
-.locker-order > div { display: grid; justify-items: start; gap: .35rem; }
+.locker-order-copy { display: grid; justify-items: start; gap: .35rem; min-width: 0; overflow-wrap: anywhere; }
 .locker-order .button { font-size: .83rem; }
+.seller-contact, .tracked-order-label { font-size: .8rem; }
+.tracked-order-label { font-family: "Segoe UI", Arial, sans-serif; }
+.parcel-choice { display: flex; align-items: center; gap: .65rem; min-height: 44px; padding: .4rem .6rem; border: 1px solid var(--border); border-radius: 8px; }
+.parcel-choice input { flex-shrink: 0; }
+.parcel-choice span { overflow-wrap: anywhere; }
 .dashboard-tabs { display: flex; gap: .35rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; overflow: auto; }
 .dashboard-tabs button { display: inline-flex; align-items: center; gap: .4rem; padding: .64rem .55rem; min-height: 45px; border-bottom: 2px solid transparent; color: var(--muted-readable); white-space: nowrap; font-size: .85rem; font-weight: 650; }
 .dashboard-tabs button.selected { color: var(--text); border-color: var(--cta); }
@@ -304,17 +314,27 @@ input[type="radio"],input[type="checkbox"] { accent-color: var(--olive); }
 .receipt-details summary svg:last-child { margin-left: auto; }
 .receipt-preview { display: block; width: 100%; background: var(--soft); margin-bottom: .65rem; }
 .receipt-preview img { margin-inline: auto; max-height: 350px; }
+.history-amounts { display: grid; gap: .4rem; margin: 0; padding: .7rem; border-radius: 8px; background: var(--soft); }
+.history-amounts div { display: flex; justify-content: space-between; gap: .7rem; }
+.history-amounts dd { margin: 0; font-weight: 700; }
+.history-events { display: grid; gap: .25rem; margin: 0; padding-left: 1.2rem; color: var(--muted-readable); font-size: .85rem; }
 .image-sheet > img { margin-inline: auto; }
 .order-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; }
 .order-actions > .button { flex: 1 1 auto; }
-.inventory-filters { display: grid; grid-template-columns: 1.4fr 1fr; gap: .6rem; padding: .7rem; }
+.inventory-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; padding: .7rem; }
+.inventory-filters > label:first-child { grid-column: 1 / -1; }
 .inventory-row { display: flex; align-items: center; }
 .inventory-row + .inventory-row { border-top: 1px solid var(--border); }
 .inventory-row .inventory-item { flex: 1; min-width: 0; }
-.inventory-delete { margin-right: .6rem; color: var(--rust); }
+.inventory-row-actions { display: flex; flex-shrink: 0; gap: .25rem; margin-right: .55rem; }
+.inventory-visibility { min-width: 44px; padding-inline: .45rem; }
+.inventory-visibility svg { display: none; }
+.inventory-delete { color: var(--rust); }
+.inventory-item-copy { min-width: 0; overflow-wrap: anywhere; }
 .inventory-item { display: grid; grid-template-columns: 43px minmax(0, 1fr) auto; padding: .55rem .6rem; align-items: center; gap: .55rem; }
 .inventory-item + .inventory-item { border-top: 1px solid var(--border); }
-.inventory-item img { width: 43px; aspect-ratio: 4 / 5; object-fit: cover; border-radius: 5px; }
+.inventory-item img, .inventory-item .inventory-thumb { width: 43px; aspect-ratio: 4 / 5; object-fit: cover; border-radius: 5px; }
+.inventory-thumb.photo-unavailable { padding: .2rem; font-size: .6rem; overflow-wrap: anywhere; }
 .inventory-item > div { display: grid; justify-items: start; gap: .1rem; }
 .inventory-item > div:last-child { justify-items: end; text-align: right; }
 .inventory-item strong { font-size: .85rem; }
@@ -340,6 +360,9 @@ input[type="radio"],input[type="checkbox"] { accent-color: var(--olive); }
 .qr-settings > label { flex: 1; }
 
 @media (min-width: 500px) {
+  .inventory-visibility svg { display: block; }
+  .inventory-filters { grid-template-columns: 1.4fr 1fr 1fr; }
+  .inventory-filters > label:first-child { grid-column: auto; }
   .store-location { display: flex; }
   .hero-content { padding-inline: 1.6rem; }
   .card-meta { padding: .7rem .75rem; }

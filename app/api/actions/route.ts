@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { HttpError, limitBody, requireOrigin, respond } from "@/lib/http";
-import { lockItem, orderState, reviewOrder } from "@/lib/inventory";
+import { lockItem, orderState, preparePayment, reviewOrder } from "@/lib/inventory";
 import { checkPassword, passwordHash } from "@/lib/password";
 import { currentSeller, sellerSession, sessionCookie, sessionSeconds } from "@/lib/security";
-import { createDrop, dashboardData, deleteGarment, listGarment, lockerLookup, markShipped, requestDispatch, updateSettings, updateShopProfile } from "@/lib/seller";
-import { id, listing, newDrop, phone, settings, shopProfile, token } from "@/lib/validation";
+import { createDrop, dashboardData, deleteGarment, listGarment, lockerLookup, markShipped, queueShipment, requestDispatch, sellerHistory, setGarmentHidden, updateSettings, updateShopProfile } from "@/lib/seller";
+import { delivery, id, listing, newDrop, orderNumber, phone, receiptRejection, settings, shopProfile, token } from "@/lib/validation";
 import { existingShop } from "@/lib/shop-status";
 
 const attempts = new Map<string, { count: number; until: number }>();
@@ -28,8 +28,9 @@ export async function POST(request: Request) {
     switch (body.action) {
       case "lock": return lockItem(id.parse(body.id), token.parse(body.token));
       case "order": return orderState(id.parse(body.id), token.parse(body.token));
-      case "locker": return { orders: await lockerLookup(phone.parse(body.phone), z.array(token).max(100).parse(body.tokens)) };
-      case "dispatch": return requestDispatch(phone.parse(body.phone), token.parse(body.token));
+      case "preparePayment": return preparePayment(id.parse(body.id), token.parse(body.token), delivery.parse(body.delivery));
+      case "locker": return { orders: await lockerLookup(orderNumber.parse(body.orderNumber), z.array(token).max(100).parse(body.tokens)) };
+      case "dispatch": return requestDispatch(z.array(token).min(1).max(100).parse(body.tokens));
       case "register": {
         limitAttempts("register", "Too many registration attempts. Try again in a minute.");
         const storeName = z.string().trim().min(2).max(100).parse(body.storeName);
@@ -74,13 +75,19 @@ export async function POST(request: Request) {
         if (!data) throw new HttpError("Store not found.", 404);
         return data;
       }
-      case "review": return reviewOrder(seller, id.parse(body.id), z.boolean().parse(body.paid));
+      case "review": {
+        const paid = z.boolean().parse(body.paid);
+        return reviewOrder(seller, id.parse(body.id), paid, paid ? undefined : receiptRejection.parse(body.reason));
+      }
+      case "history": return sellerHistory(seller, z.number().int().min(1).max(1_000_000).parse(body.page));
       case "list": return listGarment(seller, listing.parse(body.listing), id.nullable().parse(body.dropId));
       case "deleteListing": return deleteGarment(seller, id.parse(body.id));
+      case "hideListing": return setGarmentHidden(seller, id.parse(body.id), z.boolean().parse(body.hidden));
       case "settings": return updateSettings(seller, settings.parse(body.settings));
       case "shopProfile": return updateShopProfile(seller, shopProfile.parse(body.profile));
       case "createDrop": return createDrop(seller, newDrop.parse(body.drop));
       case "ship": return markShipped(seller, [...new Set(z.array(id).min(1).max(200).parse(body.ids))]);
+      case "queueShipment": return queueShipment(seller, id.parse(body.id));
       default: throw new HttpError("Unknown action.", 404);
     }
   });

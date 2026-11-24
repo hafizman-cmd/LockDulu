@@ -9,7 +9,7 @@ import { adminOverview, moderateShop } from "../lib/admin.ts";
 import { db } from "../lib/db.ts";
 import { lockItem, orderState, readItem, readStore, reviewOrder, submitReceipt } from "../lib/inventory.ts";
 import { buyerStatus } from "../lib/catalog.ts";
-import { createDrop, dashboardData, deleteGarment, listGarment, lockerLookup, markShipped, requestDispatch, updateSettings, updateShopProfile } from "../lib/seller.ts";
+import { createDrop, dashboardData, deleteGarment, listGarment, lockerLookup, markShipped, requestDispatch, sellerHistory, updateSettings, updateShopProfile } from "../lib/seller.ts";
 import { readShopDirectory } from "../lib/shop-directory.ts";
 import { requireActiveSeller } from "../lib/shop-status.ts";
 
@@ -62,8 +62,8 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
     const { quote } = await lockItem(garment.id, token);
 
     let overview = await adminOverview(1);
-    assert.equal(overview.orders, 0);
-    assert.equal(overview.shopRows.find(row => row.id === shop.id)?._count.orders, 0);
+    assert.equal(overview.activeShops, 2);
+    assert.equal(overview.heldShops, 0);
 
     await assert.rejects(moderateShop(shop.id, "hold"), /active garment lock/);
     await assert.rejects(moderateShop(shop.id, "delete"), /active garment lock/);
@@ -74,24 +74,25 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
     const delivery = { buyerName: "Test buyer", buyerPhone: phone, shippingAddress: "A test address", fulfillmentType: "HOLD_BOX" } as const;
     await submitReceipt(quote.orderId, token, delivery, "test-receipt.bin");
     overview = await adminOverview(1);
-    assert.equal(overview.orders, 0);
-    assert.equal(overview.pendingReviews, 1);
-    assert.equal(overview.shopRows.find(row => row.id === shop.id)?._count.orders, 0);
+    assert.equal(overview.activeShops, 1);
+    assert.equal(overview.heldShops, 1);
     const pending = (await readItem(garment.id))?.item;
     assert.equal(pending?.status, "PENDING_VERIFICATION");
     assert.equal(pending?.lockedUntil, null);
     assert.equal(buyerStatus(pending.status), "Awaiting payment approval");
     await assert.rejects(lockItem(garment.id, "d".repeat(64)), { status: 409 });
-    assert.equal((await lockerLookup(phone, [token])).length, 1);
+    assert.equal((await lockerLookup(quote.orderId, [token])).length, 1);
     await db().garment.update({ where: { id: available.id }, data: { status: "LOCKED", lockedUntil: new Date(Date.now() - 5_000) } });
     await moderateShop(shop.id, "hold");
     assert.deepEqual(await readShopDirectory(""), []);
     assert.equal(await readStore(shop.storeSlug), null);
     assert.equal(await readItem(garment.id), null);
     await assert.rejects(lockItem(available.id, "b".repeat(64)), { status: 404 });
-    await assert.rejects(orderState(quote.orderId, token), { status: 404 });
-    await assert.rejects(requestDispatch(phone, token), { status: 409 });
-    assert.equal((await lockerLookup(phone, [token])).length, 0);
+    assert.equal((await orderState(quote.orderId, token)).status, "PENDING_VERIFICATION");
+    await assert.rejects(requestDispatch([token]), { status: 409 });
+    assert.equal((await lockerLookup(quote.orderId, [token]))[0]?.shopStatus, "HELD");
+    assert.equal((await adminOverview(1)).shopRows.find(row => row.id === shop.id)?.unresolvedOrders, 1);
+    await assert.rejects(moderateShop(shop.id, "delete"), /pending receipts and unshipped orders/);
     const dashboard = await dashboardData(shop.id);
     assert.equal(dashboard?.seller.status, "HELD");
     assert.equal(dashboard?.orders.length, 1);
@@ -101,20 +102,26 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
     await assert.rejects(updateSettings(shop.id, settings), { status: 403 });
     await assert.rejects(updateShopProfile(shop.id, { storeName: "No change", bio: "" }), { status: 403 });
     await assert.rejects(createDrop(shop.id, { title: "No drop", scheduledAt: null }), { status: 403 });
-    await assert.rejects(reviewOrder(shop.id, quote.orderId, true), { status: 403 });
-    await assert.rejects(markShipped(shop.id, [quote.orderId]), { status: 403 });
+    await assert.rejects(markShipped(shop.id, [quote.orderId]), { status: 409 });
+    await assert.rejects(reviewOrder(otherShop.id, quote.orderId, true), { status: 409 });
+    await reviewOrder(shop.id, quote.orderId, false, "TRANSFER_NOT_FOUND");
+    const rejected = (await sellerHistory(shop.id, 1)).orders.find(order => order.id === quote.orderId);
+    assert.equal(rejected?.buyerName, "Test buyer");
+    assert.equal(rejected?.rejectionReason, "TRANSFER_NOT_FOUND");
+    assert.ok(rejected?.reviewedAt);
+    assert.equal(rejected?.hasReceipt, true);
 
     await moderateShop(shop.id, "resume");
     assert.equal((await readShopDirectory(""))[0].storeSlug, shop.storeSlug);
     assert.equal((await readStore(shop.storeSlug))?.items.length, 2);
     assert.equal((await readItem(available.id))?.item.status, "AVAILABLE");
-    assert.equal((await lockerLookup(phone, [token])).length, 1);
+    assert.equal((await lockerLookup(quote.orderId, [token])).length, 1);
     await updateSettings(shop.id, settings);
-    await reviewOrder(shop.id, quote.orderId, false);
     overview = await adminOverview(1);
-    assert.equal(overview.orders, 0);
-    assert.equal(overview.pendingReviews, 0);
+    assert.equal(overview.activeShops, 1);
+    assert.equal(overview.heldShops, 1);
     assert.equal((await orderState(quote.orderId, token)).status, "REJECTED");
+    assert.equal((await lockerLookup(quote.orderId, [token]))[0]?.rejectionReason, "TRANSFER_NOT_FOUND");
     assert.equal((await readItem(garment.id))?.item.status, "AVAILABLE");
 
     const secondToken = "e".repeat(64);
@@ -127,9 +134,8 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
     assert.equal(placed?.status, "HOLD_BOX");
     assert.equal(buyerStatus(placed.status), "Sold out");
     overview = await adminOverview(1);
-    assert.equal(overview.orders, 1);
-    assert.equal(overview.shopRows.find(row => row.id === shop.id)?._count.orders, 1);
-    assert.equal(overview.pendingReviews, 0);
+    assert.equal(overview.activeShops, 1);
+    assert.equal(overview.heldShops, 1);
 
     // Whichever write wins, moderation and a live lock cannot coexist.
     const [buyer, moderator] = await Promise.allSettled([
@@ -142,6 +148,9 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
       await db().garment.update({ where: { id: available.id }, data: { lockedUntil: new Date(Date.now() - 5_000) } });
     }
 
+    await assert.rejects(moderateShop(shop.id, "delete"), /pending receipts and unshipped orders/);
+    await requestDispatch([secondToken]);
+    await markShipped(shop.id, [confirmed.quote.orderId]);
     await moderateShop(shop.id, "delete");
     assert.equal(await readStore(shop.storeSlug), null);
     assert.equal(await readItem(garment.id), null);
@@ -150,6 +159,8 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
     assert.equal((await adminOverview(1)).shops, 1);
     assert.equal((await db().seller.findUniqueOrThrow({ where: { id: shop.id } })).passwordHash, "");
     assert.equal(await db().order.count({ where: { sellerId: shop.id, id: quote.orderId } }), 1);
+    assert.equal((await lockerLookup(confirmed.quote.orderId, [secondToken]))[0]?.shopStatus, "DELETED");
+    assert.ok((await lockerLookup(confirmed.quote.orderId, [secondToken]))[0]?.shippedAt);
   } finally {
     await db().$disconnect();
     await rm(directory, { recursive: true, maxRetries: 5 });

@@ -3,9 +3,9 @@ import { db, writeTransaction } from "./db.ts";
 import type { GarmentView, Pin, Quote } from "./catalog";
 import { HttpError } from "./http.ts";
 import { hashToken } from "./security.ts";
-import { activeShop, requireActiveSeller } from "./shop-status.ts";
+import { activeShop, requireOrderSeller } from "./shop-status.ts";
 import type { z } from "zod";
-import type { delivery } from "./validation";
+import type { delivery, receiptRejection } from "./validation";
 
 async function closeAbandonedOrders(tx: Prisma.TransactionClient, garmentIds: string[]) {
   if (!garmentIds.length) return;
@@ -19,7 +19,7 @@ async function closeAbandonedOrders(tx: Prisma.TransactionClient, garmentIds: st
 }
 
 export async function releaseExpired(scope: { sellerId: string } | { id: string }) {
-  const where = { ...scope, seller: activeShop, status: "LOCKED" as const, lockedUntil: { lte: new Date() } };
+  const where = { ...scope, status: "LOCKED" as const, lockedUntil: { lte: new Date() } };
   if (!await db().garment.findFirst({ where, select: { id: true } })) return;
   await writeTransaction(async tx => {
     const released = await tx.garment.updateManyAndReturn({
@@ -50,7 +50,7 @@ export function garmentView(item: Garment & { drop: Drop | null }): GarmentView 
     price: item.price.toFixed(2), pitInches: item.pitInches, lengthInches: item.lengthInches,
     conditionGrade: item.conditionGrade, conditionNotes: item.conditionNotes, images: garmentImages(item.images),
     flawPins: Array.isArray(item.flawPins) ? item.flawPins as Pin[] : [],
-    status: item.status, lockedUntil: item.lockedUntil?.toISOString() ?? null, dropId: item.dropId,
+    status: item.status, hidden: item.hidden, lockedUntil: item.lockedUntil?.toISOString() ?? null, dropId: item.dropId,
     locksOpen: !item.drop || item.drop.status === "LIVE",
   };
 }
@@ -62,7 +62,7 @@ export async function readStore(slug: string) {
   const activeStore = { storeSlug, ...activeShop };
   const [seller, initialItems, initialDrops] = await Promise.all([
     db().seller.findUnique({ where: activeStore, select: { ...storeSelect, bannerImageUrl: true, id: true } }),
-    db().garment.findMany({ where: { seller: activeStore }, include: { drop: true }, orderBy: { code: "asc" } }),
+    db().garment.findMany({ where: { seller: activeStore, hidden: false, deletedAt: null }, include: { drop: true }, orderBy: { code: "asc" } }),
     db().drop.findMany({ where: { seller: activeStore, status: { not: "ENDED" } }, orderBy: { scheduledAt: "asc" } }),
   ]);
   if (!seller) return null;
@@ -77,7 +77,7 @@ export async function readStore(slug: string) {
       hasDueDrops && openDueDrops(seller.id),
     ]);
     [items, drops] = await Promise.all([
-      db().garment.findMany({ where: { sellerId: seller.id, seller: activeShop }, include: { drop: true }, orderBy: { code: "asc" } }),
+      db().garment.findMany({ where: { sellerId: seller.id, seller: activeShop, hidden: false, deletedAt: null }, include: { drop: true }, orderBy: { code: "asc" } }),
       db().drop.findMany({ where: { sellerId: seller.id, seller: activeShop, status: { not: "ENDED" } }, orderBy: { scheduledAt: "asc" } }),
     ]);
   }
@@ -86,7 +86,7 @@ export async function readStore(slug: string) {
 }
 
 export async function readItem(id: string) {
-  const where = { id, seller: activeShop };
+  const where = { id, seller: activeShop, hidden: false, deletedAt: null };
   const include = { drop: true, seller: { select: storeSelect } } as const;
   let item = await db().garment.findUnique({ where, include });
   if (!item) return null;
@@ -113,14 +113,14 @@ function quote(order: Order, lockedUntil: Date): Quote {
 
 export async function lockItem(id: string, token: string) {
   const hash = hashToken(token);
-  const item = await db().garment.findUnique({ where: { id, seller: activeShop }, select: { sellerId: true } });
+  const item = await db().garment.findUnique({ where: { id, seller: activeShop, hidden: false, deletedAt: null }, select: { sellerId: true } });
   if (!item) throw new HttpError("This garment could not be found.", 404);
   await openDueDrops(item.sellerId);
   return writeTransaction(async tx => {
     const now = new Date();
     const lockedUntil = new Date(now.getTime() + 600_000);
     const updated = await tx.garment.updateMany({
-      where: { id, seller: activeShop, AND: [
+      where: { id, seller: activeShop, hidden: false, deletedAt: null, AND: [
         { OR: [{ dropId: null }, { drop: { status: "LIVE" } }] },
         { OR: [{ status: "AVAILABLE" }, { status: "LOCKED", lockedUntil: { lte: now } }] },
       ] },
@@ -128,7 +128,7 @@ export async function lockItem(id: string, token: string) {
     });
     if (!updated.count) {
       const existing = await tx.garment.findFirst({
-        where: { id, seller: activeShop, status: "LOCKED", lockSessionToken: hash, lockedUntil: { gt: new Date() } },
+        where: { id, seller: activeShop, hidden: false, deletedAt: null, status: "LOCKED", lockSessionToken: hash, lockedUntil: { gt: new Date() } },
         include: { orderItem: { include: { order: true } } },
       });
       if (existing?.lockedUntil && existing.orderItem) return { quote: quote(existing.orderItem.order, existing.lockedUntil), serverTime: Date.now() };
@@ -142,7 +142,7 @@ export async function lockItem(id: string, token: string) {
     const seller = garment.seller;
     if (!seller.qrCodeUrl) throw new HttpError("This store has not set up its payment QR yet.", 409);
     const order = await tx.order.create({ data: {
-      sellerId: seller.id, buyerAccessHash: hash, garmentCode: garment.code, itemAmount: garment.price,
+      sellerId: seller.id, buyerAccessHash: hash, garmentCode: garment.code, garmentTitle: garment.title, itemAmount: garment.price,
       shippingFee: seller.shippingFee, totalAmount: garment.price.plus(seller.shippingFee), holdBoxDays: seller.holdBoxDays,
       qrCodeUrl: seller.qrCodeUrl, qrAccountName: seller.qrAccountName, qrBankLabel: seller.qrBankLabel,
       items: { create: { garmentId: id } },
@@ -153,7 +153,7 @@ export async function lockItem(id: string, token: string) {
 
 export async function orderState(orderId: string, token: string) {
   const order = await db().order.findUnique({
-    where: { id: orderId, buyerAccessHash: hashToken(token), seller: activeShop },
+    where: { id: orderId, buyerAccessHash: hashToken(token) },
     include: { items: { include: { garment: true } } },
   });
   if (!order) throw new HttpError("This checkout could not be found.", 404);
@@ -162,10 +162,30 @@ export async function orderState(orderId: string, token: string) {
     await releaseExpired({ id: garment.id });
     return orderState(orderId, token);
   }
+  const checkoutQuote = order.paymentStatus === "AWAITING_RECEIPT" && garment?.lockedUntil ? quote(order, garment.lockedUntil) : null;
   return {
-    status: order.paymentStatus, code: order.garmentCode, serverTime: Date.now(),
-    quote: order.paymentStatus === "AWAITING_RECEIPT" && garment?.lockedUntil ? quote(order, garment.lockedUntil) : null,
+    status: order.paymentStatus, code: order.garmentCode, serverTime: Date.now(), rejectionReason: order.rejectionReason,
+    quote: checkoutQuote,
+    delivery: checkoutQuote && order.buyerPhone ? {
+      buyerName: order.buyerName, buyerPhone: order.buyerPhone, shippingAddress: order.shippingAddress, fulfillmentType: order.fulfillmentType,
+    } : null,
   };
+}
+
+export async function preparePayment(orderId: string, token: string, details: z.infer<typeof delivery>) {
+  return writeTransaction(async tx => {
+    const hash = hashToken(token);
+    const where = {
+      id: orderId, buyerAccessHash: hash, paymentStatus: "AWAITING_RECEIPT", seller: activeShop,
+      items: { some: { garment: { status: "LOCKED", lockSessionToken: hash, lockedUntil: { gt: new Date() } } } },
+    } as const;
+    const order = await tx.order.findUnique({ where, select: { itemAmount: true, shippingFee: true } });
+    if (!order) throw new HttpError("Your reservation has ended. Check your order status before paying.", 409);
+    await tx.order.update({ where, data: {
+      ...details, totalAmount: details.fulfillmentType === "HOLD_BOX" ? order.itemAmount : order.itemAmount.plus(order.shippingFee),
+    } });
+    return { ok: true };
+  });
 }
 
 export async function submitReceipt(orderId: string, token: string, details: z.infer<typeof delivery>, receiptImageUrl: string) {
@@ -187,16 +207,17 @@ export async function submitReceipt(orderId: string, token: string, details: z.i
       throw new HttpError("Your lock has expired or been released.", 409);
     }
     await tx.order.update({ where: { id: orderId }, data: {
-      ...details, receiptImageUrl, paymentStatus: "PENDING_VERIFICATION",
+      ...details, receiptImageUrl, receiptSubmittedAt: new Date(), paymentStatus: "PENDING_VERIFICATION",
       totalAmount: details.fulfillmentType === "HOLD_BOX" ? order.itemAmount : order.itemAmount.plus(order.shippingFee),
     } });
     return { orderId, code: order.garmentCode, status: "PENDING_VERIFICATION" as const, stored: true };
   });
 }
 
-export async function reviewOrder(sellerId: string, orderId: string, paid: boolean) {
+export async function reviewOrder(sellerId: string, orderId: string, paid: boolean, rejectionReason?: z.infer<typeof receiptRejection>) {
   return writeTransaction(async tx => {
-    await requireActiveSeller(tx, sellerId);
+    await requireOrderSeller(tx, sellerId);
+    if (!paid && !rejectionReason) throw new HttpError("Choose a reason for rejecting this receipt.");
     const order = await tx.order.findUnique({
       where: { id: orderId, sellerId, paymentStatus: "PENDING_VERIFICATION" }, include: { items: true },
     });
@@ -208,6 +229,7 @@ export async function reviewOrder(sellerId: string, orderId: string, paid: boole
     if (!changed.count) throw new HttpError("This receipt has already been reviewed.", 409);
     const reviewed = await tx.order.updateMany({ where: { id: orderId, paymentStatus: "PENDING_VERIFICATION" }, data: {
       paymentStatus: paid ? "VERIFIED_PAID" : "REJECTED", verifiedAt: paid ? new Date() : null,
+      rejectionReason: paid ? null : rejectionReason, reviewedAt: new Date(),
     } });
     if (!reviewed.count) throw new HttpError("This receipt has already been reviewed.", 409);
     if (!paid) await tx.orderItem.delete({ where: { id: order.items[0].id } });

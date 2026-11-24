@@ -107,6 +107,8 @@ model Garment {
   images           Json
   flawPins         Json
   status           GarmentStatus   @default(AVAILABLE)
+  hidden           Boolean         @default(false)
+  deletedAt        DateTime?
   lockedUntil      DateTime?
   lockSessionToken String?
   orderItem        OrderItem?
@@ -132,17 +134,24 @@ model Order {
   qrAccountName       String
   qrBankLabel         String
   garmentCode         String
+  garmentTitle        String?
   buyerAccessHash     String          @unique
   receiptImageUrl     String?
   paymentStatus       PaymentStatus   @default(AWAITING_RECEIPT)
   createdAt           DateTime        @default(now())
   verifiedAt          DateTime?
+  receiptSubmittedAt  DateTime?
+  reviewedAt          DateTime?
+  rejectionReason     String?
   dispatchRequestedAt DateTime?
+  dispatchGroupId     String?
   shippedAt           DateTime?
+  shipmentUnconfirmed Boolean         @default(false)
   items               OrderItem[]
 
   @@index([sellerId, paymentStatus])
   @@index([buyerPhone, paymentStatus])
+  @@index([sellerId, dispatchGroupId])
 }
 
 model OrderItem {

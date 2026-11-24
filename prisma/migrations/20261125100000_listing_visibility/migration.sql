@@ -1,0 +1,1 @@
+ALTER TABLE "Garment" ADD COLUMN "hidden" BOOLEAN NOT NULL DEFAULT false;

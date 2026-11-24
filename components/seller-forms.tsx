@@ -200,11 +200,16 @@ export function ShopProfile({ seller, onSaved }: { seller: DashboardData["seller
     try {
       const bannerImageUrl = bannerFile ? await sendImage(bannerFile, "garment") : banner;
       if (bannerFile) { setBanner(bannerImageUrl); setBannerFile(null); }
-      await action("shopProfile", { profile: { storeName: fields.get("storeName"), bio: fields.get("bio"), bannerImageUrl } });
+      await action("shopProfile", { profile: {
+        storeName: fields.get("storeName"), bio: fields.get("bio"), whatsappNumber: fields.get("whatsappNumber"), bannerImageUrl,
+      } });
       await onSaved();
     } catch (exception) { setError(message(exception)); } finally { setBusy(false); }
   }}>
     <label>Shop name<input name="storeName" required minLength={2} maxLength={100} defaultValue={seller.storeName} /></label>
+    <label>Seller WhatsApp number<input name="whatsappNumber" type="tel" autoComplete="tel" inputMode="tel" required
+      maxLength={30} defaultValue={seller.whatsappNumber ? `+${seller.whatsappNumber}` : ""} placeholder="012 345 6789" /></label>
+    <p className="muted">Buyers reach this number when they tap Message seller on an order.</p>
     <label>Shop description<textarea name="bio" maxLength={500} rows={3} defaultValue={seller.bio} placeholder="Tell buyers about your shop" /></label>
     <p className="muted">Your description appears in Browse shops and on your storefront.</p>
     <div className="stack">

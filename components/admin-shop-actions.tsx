@@ -6,19 +6,21 @@ import type { ShopModeration } from "@/lib/admin";
 import { Notice, Sheet } from "./common";
 
 const actions = {
-  hold: { label: "Hold shop", details: "The shop and its listings will be hidden from buyers. The seller can sign in and view their dashboard, with shop changes disabled." },
+  hold: { label: "Hold shop", details: "The storefront will be hidden and new checkouts will stop. Buyers can track existing orders, and the seller can still review receipts and fulfill them." },
   resume: { label: "Resume shop", details: "The shop will be visible to buyers again, and the seller will regain access to their shop tools." },
-  delete: { label: "Delete shop", details: "This permanently removes the storefront and listings from LockDulu and disables seller sign-in for this shop." },
+  delete: { label: "Delete shop", details: "This permanently removes the storefront and disables seller sign-in. Resolve all pending receipts and unshipped orders before deleting." },
 };
 
-export function AdminShopActions({ shopId, shopName, held }: { shopId: string; shopName: string; held: boolean }) {
+export function AdminShopActions({ shopId, shopName, held, unresolvedOrders }: {
+  shopId: string; shopName: string; held: boolean; unresolvedOrders: number;
+}) {
   const [command, setCommand] = useState<ShopModeration | null>(null);
   return <>
     <div className="admin-shop-actions">
       <button className="button" onClick={() => setCommand(held ? "resume" : "hold")}>
         {held ? "Resume" : "Hold"}
       </button>
-      <button className="button reject" onClick={() => setCommand("delete")}>Delete</button>
+      <button className="button reject" disabled={unresolvedOrders > 0} onClick={() => setCommand("delete")}>Delete</button>
     </div>
     {command && <ShopActionDialog shopId={shopId} shopName={shopName} command={command} onClose={() => setCommand(null)} />}
   </>;

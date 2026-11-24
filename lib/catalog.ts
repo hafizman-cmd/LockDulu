@@ -23,7 +23,7 @@ export type Pin = { x: number; y: number; note: string; photo?: "front" | "back"
 export type GarmentView = {
   id: string; code: string; title: string; brand: string; category: GarmentCategory;
   price: string; pitInches: number; lengthInches: number; conditionGrade: ConditionGrade;
-  conditionNotes: string; images: string[]; flawPins: Pin[]; status: GarmentStatus;
+  conditionNotes: string; images: string[]; flawPins: Pin[]; status: GarmentStatus; hidden: boolean;
   lockedUntil: string | null; dropId: string | null; locksOpen: boolean;
 };
 export type DropView = { id: string; title: string; scheduledAt: string; status: "UPCOMING" | "LIVE" | "ENDED" };
@@ -33,6 +33,19 @@ export type Quote = {
   holdBoxDays: number; qrCodeUrl: string; qrAccountName: string; qrBankLabel: string;
 };
 export function money(amount: string | number) { return `RM${Number(amount).toFixed(2)}`; }
+export const receiptRejectionLabels = {
+  UNREADABLE_RECEIPT: "Receipt image could not be read",
+  TRANSFER_NOT_FOUND: "Transfer could not be matched",
+} as const;
+export function rejectionMessage(reason: string | null | undefined) {
+  return reason === "UNREADABLE_RECEIPT" ? "The seller could not read your receipt. Contact them with a clearer screenshot if you paid."
+    : reason === "TRANSFER_NOT_FOUND" ? "The seller could not match the transfer. Contact them with your bank reference if you paid."
+    : "The seller could not verify your payment. Contact them if you already paid.";
+}
+
+export function holdBoxDaysLeft(verifiedAt: string, holdBoxDays: number, now: number) {
+  return Math.ceil((Date.parse(verifiedAt) + holdBoxDays * 86_400_000 - now) / 86_400_000);
+}
 export function measurements(item: Pick<GarmentView, "pitInches" | "lengthInches">) {
   return `${item.pitInches}" × ${item.lengthInches}"`;
 }

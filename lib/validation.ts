@@ -1,9 +1,13 @@
 import { z } from "zod";
-import { categories, grades } from "./catalog";
+import { categories, grades, receiptRejectionLabels } from "./catalog";
 import { normalizePhone, tokenPattern } from "./security";
 
 export const id = z.string().min(1).max(100);
+export const orderNumber = z.string().trim().min(1, "Enter your order number.").max(100).toLowerCase();
 export const token = z.string().regex(tokenPattern);
+export const receiptRejection = z.enum(Object.keys(receiptRejectionLabels) as (keyof typeof receiptRejectionLabels)[], {
+  error: "Choose a reason for rejecting this receipt.",
+});
 export const phone = z.string().trim().max(30).transform(normalizePhone).pipe(z.string().regex(/^60[1-9]\d{7,9}$/, "Enter a valid Malaysian WhatsApp number."));
 export const delivery = z.object({
   buyerName: z.string().trim().min(2, "Enter the buyer's name.").max(100),
@@ -39,6 +43,7 @@ export const shopProfile = z.object({
   storeName: z.string().trim().min(2, "Use at least 2 characters for your shop name.").max(100),
   bio: z.string().trim().max(500, "Keep the shop description under 500 characters."),
   bannerImageUrl: assetUrl.nullable().optional(),
+  whatsappNumber: phone.optional(),
 });
 export const newDrop = z.object({
   title: z.string().trim().min(2, "Use at least 2 characters for the drop name.").max(100),

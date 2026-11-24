@@ -6,6 +6,10 @@ import { databaseConfig } from "./database-config.ts";
 const scope = globalThis as typeof globalThis & { lockDuluDb?: PrismaClient };
 
 export function db() {
+  // Fast Refresh can reload the generated client while preserving the previous instance.
+  if (process.env.NODE_ENV === "development" && !(scope.lockDuluDb instanceof PrismaClient)) {
+    scope.lockDuluDb = undefined;
+  }
   return scope.lockDuluDb ??= new PrismaClient({
     adapter: new PrismaLibSql(databaseConfig()),
   });

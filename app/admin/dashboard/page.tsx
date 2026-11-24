@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowUpRight, LayoutGrid, LogOut, ReceiptText, ShieldCheck, Store, Tag } from "lucide-react";
+import { ArrowUpRight, LayoutGrid, LogOut, ShieldCheck, Store, Tag, CirclePause } from "lucide-react";
 import { AdminLogin } from "@/components/admin-login";
 import { AdminShopActions } from "@/components/admin-shop-actions";
 import { Footer, Header, Notice } from "@/components/common";
@@ -33,8 +33,8 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
   const metrics = [
     { label: "Registered shops", value: overview.shops, icon: Store },
     { label: "Listings", value: overview.listings, icon: Tag },
-    { label: "Confirmed orders", value: overview.orders, icon: ReceiptText },
-    { label: "Payments awaiting review", value: overview.pendingReviews, icon: ShieldCheck },
+    { label: "Active shops", value: overview.activeShops, icon: ShieldCheck },
+    { label: "Shops on hold", value: overview.heldShops, icon: CirclePause },
   ];
 
   return <>
@@ -43,7 +43,7 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
       <div className="admin-heading">
         <div className="section-intro">
           <h1>Admin dashboard</h1>
-          <p>Shops, listings, and orders across LockDulu.</p>
+          <p>Manage shops across LockDulu.</p>
         </div>
         <form action={logoutAdmin}>
           <button className="button"><LogOut size={17} aria-hidden="true" /> Sign out</button>
@@ -61,7 +61,7 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
         <h2 id="manage-shops"><LayoutGrid size={20} aria-hidden="true" /> Manage shops</h2>
         {overview.shopRows.length ? <div className="admin-table-scroll" role="region" aria-label="Shops table" tabIndex={0}>
           <table>
-            <thead><tr><th scope="col">Shop</th><th scope="col">Joined</th><th scope="col">Listings</th><th scope="col">Confirmed orders</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+            <thead><tr><th scope="col">Shop</th><th scope="col">Joined</th><th scope="col">Listings</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
             <tbody>{overview.shopRows.map(shop => <tr key={shop.id}>
               <th scope="row">
                 {shop.status === "HELD" ? shop.storeName : <Link href={`/${shop.storeSlug}`}>
@@ -71,9 +71,11 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
               </th>
               <td><time dateTime={shop.createdAt.toISOString()}>{dates.format(shop.createdAt)}</time></td>
               <td>{numbers.format(shop._count.garments)}</td>
-              <td>{numbers.format(shop._count.orders)}</td>
               <td><span className={`badge ${shop.status === "HELD" ? "badge-pending_verification" : "badge-available"}`}>{shop.status === "HELD" ? "On hold" : "Active"}</span></td>
-              <td><AdminShopActions shopId={shop.id} shopName={shop.storeName} held={shop.status === "HELD"} /></td>
+              <td>
+                <AdminShopActions shopId={shop.id} shopName={shop.storeName} held={shop.status === "HELD"} unresolvedOrders={shop.unresolvedOrders} />
+                {shop.unresolvedOrders > 0 && <p className="muted">{shop.unresolvedOrders} unresolved {shop.unresolvedOrders === 1 ? "order" : "orders"}</p>}
+              </td>
             </tr>)}</tbody>
           </table>
         </div> : <p className="muted">No shops have registered yet.</p>}
