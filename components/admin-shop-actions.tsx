@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { createContext, useActionState, useContext, useState, type ReactNode } from "react";
 import { changeShopStatus } from "@/app/admin/dashboard/moderation-actions";
 import type { ShopModeration } from "@/lib/admin";
 import { Notice, Sheet } from "./common";
@@ -10,6 +10,16 @@ const actions = {
   resume: { label: "Resume shop", details: "The shop will be visible to buyers again, and the seller will regain access to their shop tools." },
   delete: { label: "Delete shop", details: "This permanently removes the storefront and disables seller sign-in. Resolve pending receipts, unshipped orders, and open transfer reports before deleting." },
 };
+
+const Feedback = createContext<(message: string) => void>(() => {});
+
+export function AdminShopFeedback({ children }: { children: ReactNode }) {
+  const [message, setMessage] = useState("");
+  return <Feedback.Provider value={setMessage}>
+    <div className="admin-shop-feedback" role="status">{message && <p className="notice success">{message}</p>}</div>
+    {children}
+  </Feedback.Provider>;
+}
 
 export function AdminShopActions({ shopId, shopName, held, unresolvedOrders }: {
   shopId: string; shopName: string; held: boolean; unresolvedOrders: number;
@@ -30,12 +40,20 @@ function ShopActionDialog({ shopId, shopName, command, onClose }: {
   shopId: string; shopName: string; command: ShopModeration; onClose: () => void;
 }) {
   const { label, details } = actions[command];
+  const announce = useContext(Feedback);
   const [error, submit, pending] = useActionState(async (previousError: string, form: FormData) => {
+    announce("");
     const result = await changeShopStatus(previousError, form);
-    if (!result) onClose();
+    if (!result) {
+      const outcome = command === "hold" ? "is on hold. The storefront is hidden."
+        : command === "resume" ? "is active. The storefront is visible again."
+        : "was deleted. The storefront and seller sign-in are disabled.";
+      announce(`${shopName} ${outcome}`);
+      onClose();
+    }
     return result;
   }, "");
-  return <Sheet title={`${label}?`} onClose={() => { if (!pending) onClose(); }}>
+  return <Sheet title={`${label}?`} closeDisabled={pending} onClose={onClose}>
     <form className="stack" action={submit}>
       <p><strong>{shopName}</strong></p>
       <p>{details}</p>

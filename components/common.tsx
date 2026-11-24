@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { AlertCircle, Box, Check, Clock3, Copy, LockKeyhole, Menu, Moon, Sun, Tag, X } from "lucide-react";
 import { buyerStatus, grades, statuses, timer, type GarmentView } from "@/lib/catalog";
 import { readLocal, savedLocks, writeLocal, type SavedLock } from "./client";
@@ -49,14 +49,16 @@ export function Footer({ storeName }: { storeName?: string }) {
   return <footer className="site-footer"><div className="wrap footer-inner"><Brand /><span>{storeName ?? "Live vintage drops"}</span><Link href="/dashboard">Seller dashboard</Link></div></footer>;
 }
 
-export function GarmentPhoto({ src, alt, className, loading, onUnavailable }: {
-  src?: string; alt: string; className?: string; loading?: "lazy" | "eager"; onUnavailable?: () => void;
+export function GarmentPhoto({ src, alt, className, loading, unavailableLabel = "Photo unavailable", ref, onLoad, onUnavailable }: {
+  src?: string; alt: string; className?: string; loading?: "lazy" | "eager";
+  unavailableLabel?: string; ref?: React.Ref<HTMLImageElement>;
+  onLoad?: React.ReactEventHandler<HTMLImageElement>; onUnavailable?: () => void;
 }) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   if (!src || failedSrc === src) {
-    return <div className={`photo-unavailable ${className ?? ""}`} role="img" aria-label="Photo unavailable">Photo unavailable</div>;
+    return <span className={`photo-unavailable ${className ?? ""}`} role="img" aria-label={unavailableLabel}>{unavailableLabel}</span>;
   }
-  return <img src={src} alt={alt} className={className} loading={loading} draggable={false} onError={() => { setFailedSrc(src); onUnavailable?.(); }} />;
+  return <img ref={ref} src={src} alt={alt} className={className} loading={loading} draggable={false} onLoad={onLoad} onError={() => { setFailedSrc(src); onUnavailable?.(); }} />;
 }
 
 export function Stage({ item, now, showCondition = false, buyer = false }: { item: GarmentView; now: number; showCondition?: boolean; buyer?: boolean }) {
@@ -72,29 +74,58 @@ export function Stage({ item, now, showCondition = false, buyer = false }: { ite
   </span>;
 }
 
-export function Sheet({ title, children, onClose, className = "" }: {
-  title: string; children: React.ReactNode; onClose: () => void; className?: string;
+export function Sheet({ title, children, onClose, className = "", closeDisabled = false }: {
+  title: string; children: React.ReactNode; onClose: () => void; className?: string; closeDisabled?: boolean;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const titleId = useId();
   useEffect(() => {
     const element = dialog.current;
     if (!element) return;
+    const opener = document.activeElement;
+    const viewport = window.visualViewport;
+    const fitViewport = () => {
+      if (!viewport || viewport.scale !== 1) {
+        element.style.removeProperty("--sheet-height");
+        element.style.removeProperty("--sheet-top");
+        element.style.removeProperty("--sheet-bottom");
+        return;
+      }
+      element.style.setProperty("--sheet-height", `${viewport.height}px`);
+      element.style.setProperty("--sheet-top", `${viewport.offsetTop}px`);
+      const bottom = document.documentElement.clientHeight - viewport.height - viewport.offsetTop;
+      element.style.setProperty("--sheet-bottom", `${Math.max(0, bottom)}px`);
+    };
+    fitViewport();
+    viewport?.addEventListener("resize", fitViewport);
+    viewport?.addEventListener("scroll", fitViewport);
     element.showModal();
+    heading.current?.focus({ preventScroll: true });
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    return () => { element.close(); document.body.style.overflow = previous; };
+    return () => {
+      viewport?.removeEventListener("resize", fitViewport);
+      viewport?.removeEventListener("scroll", fitViewport);
+      element.close();
+      document.body.style.overflow = previous;
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus({ preventScroll: true });
+    };
   }, []);
-  return <dialog ref={dialog} aria-label={title} className={`sheet glass ${className}`}
+  const requestClose = () => { if (!closeDisabled) onClose(); };
+  return <dialog ref={dialog} aria-labelledby={titleId} className={`sheet glass ${className}`}
     onCancel={event => {
       if (event.target !== event.currentTarget) return;
-      event.preventDefault(); onClose();
+      event.preventDefault(); requestClose();
     }}
     onClick={event => {
       if (event.target !== dialog.current) return;
       const box = event.currentTarget.getBoundingClientRect();
-      if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) onClose();
+      if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) requestClose();
     }}>
-    <div className="sheet-head"><h2>{title}</h2><button className="icon-button" aria-label="Close" onClick={onClose}><X size={21} strokeWidth={1.5} /></button></div>
+    <div className="sheet-head"><h2 id={titleId} ref={heading} tabIndex={-1}>{title}</h2>
+      <button type="button" className="icon-button" aria-label="Close" aria-disabled={closeDisabled} onClick={requestClose}><X size={21} strokeWidth={1.5} /></button>
+    </div>
     {children}
   </dialog>;
 }

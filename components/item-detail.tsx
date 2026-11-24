@@ -25,8 +25,16 @@ const deliveryKey = "lockdulu.rememberedDelivery";
 function Gallery({ item }: { item: GarmentView }) {
   const [index, setIndex] = useState(0);
   const [pin, setPin] = useState<number | null>(null);
-  const [unavailable, setUnavailable] = useState<string[]>([]);
+  const [photoLayout, setPhotoLayout] = useState<{ src: string; ratio: number } | null>(null);
   const touchdown = useRef(0);
+  const photo = item.images[index];
+  const photoName = photoNames[index] ?? "Photo";
+  const ratio = photoLayout && photoLayout.src === photo ? photoLayout.ratio : undefined;
+  const sizePhoto = useCallback((image: HTMLImageElement | null) => {
+    if (!photo || !image?.naturalWidth || !image.naturalHeight) return;
+    const ratio = image.naturalWidth / image.naturalHeight;
+    setPhotoLayout(current => current?.src === photo && current.ratio === ratio ? current : { src: photo, ratio });
+  }, [photo]);
   const go = (next: number) => { setIndex((next + item.images.length) % item.images.length); setPin(null); };
   return <div className="gallery">
     <div className="gallery-main" onTouchStart={event => { touchdown.current = event.changedTouches[0].clientX; }}
@@ -35,18 +43,23 @@ function Gallery({ item }: { item: GarmentView }) {
         const dx = event.changedTouches[0].clientX - touchdown.current;
         if (Math.abs(dx) > 48) go(index + (dx < 0 ? 1 : -1));
       }}>
-      {item.images[index] ? <div className="gallery-photo">
-        <GarmentPhoto src={item.images[index]} alt={`${item.title} · ${photoNames[index] ?? "Photo"}`} onUnavailable={() => setUnavailable(current => [...current, item.images[index]])} />
-        {!unavailable.includes(item.images[index]) && index < 2 && item.flawPins.map((point, i) => (point.photo ?? "front") === (index === 0 ? "front" : "back") && <button key={i} className="flaw-pin" style={{ left: `${point.x}%`, top: `${point.y}%` }}
-          aria-label={`View flaw ${i + 1}`} aria-pressed={i === pin} onClick={() => setPin(pin === i ? null : i)}>{i + 1}</button>)}
-      </div> : <p className="muted">No photo available</p>}
+      <div className="gallery-photo" data-sized={ratio ? true : undefined} style={ratio ? {
+        width: `min(100cqw, ${100 * ratio}cqh)`,
+        height: `min(100cqh, ${100 / ratio}cqw)`,
+      } : undefined}>
+        <GarmentPhoto key={photo} src={photo} alt={`${item.title} · ${photoName}`}
+          ref={sizePhoto} onLoad={event => sizePhoto(event.currentTarget)}
+          onUnavailable={() => setPhotoLayout(current => current?.src === photo ? null : current)} />
+        {ratio && index < 2 && item.flawPins.map((point, i) => (point.photo ?? "front") === (index === 0 ? "front" : "back") && <button key={i} className="flaw-pin" style={{ left: `${point.x}%`, top: `${point.y}%` }}
+          aria-label={`View flaw ${i + 1} on ${photoName.toLowerCase()} photo`} aria-pressed={i === pin} onClick={() => setPin(pin === i ? null : i)}>{i + 1}</button>)}
+      </div>
       {item.images.length > 1 && <div className="gallery-arrows">
         <button className="icon-button" aria-label="Previous photo" onClick={() => go(index - 1)}><ChevronLeft size={20} strokeWidth={1.5} /></button>
         <button className="icon-button" aria-label="Next photo" onClick={() => go(index + 1)}><ChevronRight size={20} strokeWidth={1.5} /></button>
       </div>}
     </div>
-    {pin !== null && <div className="pin-note" role="status"><b>{pin + 1}</b> {item.flawPins[pin]?.note}</div>}
-    {item.images.length > 1 && <div className="thumbnails" aria-label="Garment photos">
+    {ratio && pin !== null && item.flawPins[pin] && <div className="pin-note" role="status"><b>{pin + 1}</b> {item.flawPins[pin].note}</div>}
+    {item.images.length > 1 && <div className="thumbnails" role="group" aria-label="Garment photos">
       {item.images.map((image, i) => <button className={i === index ? "selected" : ""} key={i} onClick={() => go(i)} aria-pressed={i === index}>
         <GarmentPhoto src={image} alt="" /><span>{photoNames[i] ?? "Photo"}</span>
       </button>)}
@@ -325,7 +338,18 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
           <div className="detail-top"><span className="eyebrow">{item.code} / {item.category}</span><Stage item={item} now={now} buyer /></div>
           <h1>{item.title}</h1><p className="muted">{item.brand}</p>
           <div className="detail-price">{money(item.price)}</div>
-          <div className="condition surface"><h2>{grades[item.conditionGrade]}</h2><p>{item.conditionNotes || "No additional condition notes."}</p></div>
+          <div className="condition surface">
+            <h2>{grades[item.conditionGrade]}</h2>
+            <p>{item.conditionNotes || "No additional condition notes."}</p>
+            {item.flawPins.length > 0 && <div className="flaw-notes">
+              <h3>Flaw notes</h3>
+              <ol role="list">
+                {item.flawPins.map((point, i) => <li key={i}>
+                  <strong>{photoNames[point.photo === "back" ? 1 : 0]} photo</strong> <span>{point.note}</span>
+                </li>)}
+              </ol>
+            </div>}
+          </div>
           <Schematic item={item} />
           <p className="detail-hint"><ShieldCheck size={18} strokeWidth={1.5} /> One piece available per listing. Receipt verification is handled by the seller.</p>
           {stale && <AvailabilityNotice serverTime={data.serverTime} />}
@@ -344,7 +368,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
         {!open && error && <Notice>{error}</Notice>}
       </div>
     </div>
-    {open && (quote || done) && <Sheet title={done?.status === "EXPIRED" || expired && !busy ? "Reservation expired" : done?.status === "VERIFIED_PAID" ? "Payment confirmed" : done?.status === "REJECTED" ? "Payment receipt rejected" : done ? "Payment receipt received" : "Checkout"} onClose={() => { if (!busy) { setOpen(false); setError(""); } }}>
+    {open && (quote || done) && <Sheet title={done?.status === "EXPIRED" || expired && !busy ? "Reservation expired" : done?.status === "VERIFIED_PAID" ? "Payment confirmed" : done?.status === "REJECTED" ? "Payment receipt rejected" : done ? "Payment receipt received" : "Checkout"} closeDisabled={busy} onClose={() => { setOpen(false); setError(""); }}>
       {done?.status === "EXPIRED" || expired && !busy ? <div className="stack">
         <Notice>Your ten-minute reservation ended. The garment may now be available to another buyer.</Notice>
         {reference && <OrderReference key={reference} number={reference} showHint />}

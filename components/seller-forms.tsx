@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { ImagePlus, Minus, Plus, QrCode, Trash2 } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ImagePlus, Minus, Plus, QrCode, Trash2 } from "lucide-react";
 import { categories, grades, type GarmentView, type Pin } from "@/lib/catalog";
 import { garmentBackgrounds, makeGarmentPhoto, prepareGarmentCutout, type GarmentBackground } from "@/lib/garment-background";
 import type { DashboardData } from "@/lib/seller";
@@ -20,13 +20,22 @@ type FrontCutout = {
 type PublishRequest = { requestId: string; dropId: FormDataEntryValue | null; listing: object };
 
 function Stepper({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const id = useId();
   const update = (amount: number) => onChange(String(Math.min(100, Math.max(5, (Number(value) || 0) + amount))));
-  return <label>{label}<div className="stepper">
+  return <div className="measurement-field"><label htmlFor={id}>{label}</label><div className="stepper">
     <button type="button" className="icon-button" onClick={() => update(-0.5)} aria-label={`Decrease ${label}`}><Minus size={16} strokeWidth={1.5} /></button>
-    <input required type="number" inputMode="decimal" min="5" max="100" step=".1" value={value} onChange={event => onChange(event.target.value)} />
+    <input id={id} required type="number" inputMode="decimal" min="5" max="100" step=".1" value={value} onChange={event => onChange(event.target.value)} />
     <button type="button" className="icon-button" onClick={() => update(0.5)} aria-label={`Increase ${label}`}><Plus size={16} strokeWidth={1.5} /></button>
-  </div></label>;
+  </div></div>;
 }
+
+const pinDirections = {
+  ArrowLeft: { offset: [-1, 0], label: "Move pin left", Icon: ArrowLeft },
+  ArrowRight: { offset: [1, 0], label: "Move pin right", Icon: ArrowRight },
+  ArrowUp: { offset: [0, -1], label: "Move pin up", Icon: ArrowUp },
+  ArrowDown: { offset: [0, 1], label: "Move pin down", Icon: ArrowDown },
+} as const;
+const pinCoordinate = (value: number) => Math.round(Math.min(100, Math.max(0, value)) * 100) / 100;
 
 export function QuickList({ data, item, onClose, onListed }: { data: DashboardData; item?: GarmentView; onClose: () => void; onListed: (code: string) => Promise<void> }) {
   const [grade, setGrade] = useState<keyof typeof grades>(item?.conditionGrade ?? "VINTAGE_FADE");
@@ -38,12 +47,23 @@ export function QuickList({ data, item, onClose, onListed }: { data: DashboardDa
   const [pins, setPins] = useState<Pin[]>(item?.flawPins ?? []);
   const [activePin, setActivePin] = useState<number | null>(null);
   const [pinPhoto, setPinPhoto] = useState<"front" | "back">("front");
+  const [pinFeedback, setPinFeedback] = useState("");
+  const pinInstructions = useId();
+  const pinCanvas = useRef<HTMLButtonElement>(null);
+  const activeMarker = useRef<HTMLButtonElement>(null);
+  const focusNextMarker = useRef(false);
   const [pit, setPit] = useState(String(item?.pitInches ?? 22));
   const [length, setLength] = useState(String(item?.lengthInches ?? 28));
   const [category, setCategory] = useState<string>(item?.category ?? "Tee");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [pendingPublish, setPendingPublish] = useState<PublishRequest | null>(null);
+  useEffect(() => {
+    if (focusNextMarker.current && activeMarker.current) {
+      focusNextMarker.current = false;
+      activeMarker.current.focus();
+    }
+  }, [activePin]);
   const publishKey = `lockdulu.pendingPublish.${data.seller.storeSlug}`;
   useEffect(() => {
     if (!item) setPendingPublish(readLocal<PublishRequest | null>(publishKey, null, "sessionStorage"));
@@ -111,7 +131,17 @@ export function QuickList({ data, item, onClose, onListed }: { data: DashboardDa
     finally { setBusy(false); }
   }
 
-  return <Sheet title={item ? "Edit listing" : "Quick list a garment"} onClose={() => { if (!busy && !pendingPublish) onClose(); }}>
+  function movePin(index: number, offset: readonly [number, number], step = 1) {
+    const pin = pins[index];
+    const x = pinCoordinate(pin.x + offset[0] * step);
+    const y = pinCoordinate(pin.y + offset[1] * step);
+    setPins(pins.map((point, i) => i === index ? { ...point, x, y } : point));
+    setActivePin(index);
+    setPinFeedback(`Flaw ${index + 1}. ${x}% from left, ${y}% from top.`);
+  }
+
+  const publicationUnconfirmed = "Publication could not be confirmed. Check the same publish request before editing or publishing again.";
+  return <Sheet title={item ? "Edit listing" : "Quick list a garment"} closeDisabled={busy || uploading > 0 || !!pendingPublish} onClose={onClose}>
     <form className="stack" onSubmit={async event => {
       event.preventDefault();
       if (busy || pendingPublish || uploading || (preparing && !useOriginal)) return;
@@ -153,26 +183,32 @@ export function QuickList({ data, item, onClose, onListed }: { data: DashboardDa
       } catch (exception) {
         if (publishAttempt && (!(exception instanceof RequestError) || exception.status >= 500 || exception.status < 400)) {
           setPendingPublish(publishAttempt);
-          setError("Publication could not be confirmed. Check the same publish request before editing or publishing again.");
+          setError(publicationUnconfirmed);
         } else {
           if (publishAttempt) removeLocal(publishKey, "sessionStorage");
           setError(message(exception));
         }
       } finally { setBusy(false); }
     }}>
-      <fieldset className="stack" disabled={busy || !!pendingPublish}>
-        <div className="order-ref"><span>{item ? "Item code" : "Next item code"}</span><strong>{item?.code ?? `B-${String(data.seller.nextItemNumber).padStart(3, "0")}`}</strong></div>
-        <label>Garment title<input name="title" required maxLength={100} defaultValue={item?.title} placeholder="Carhartt Detroit Work Jacket" /></label>
-        <div className="field-grid"><label>Brand<input name="brand" required maxLength={70} defaultValue={item?.brand} /></label><label>Price (RM)<input name="price" required type="number" min=".01" max="999999" step=".01" inputMode="decimal" defaultValue={item?.price} /></label></div>
-        <div className="field-grid"><label>Category<select name="category" value={category} onChange={event => setCategory(event.target.value)}>{categories.map(entry => <option key={entry}>{entry}</option>)}</select></label>
-          <label>Drop<select name="dropId" defaultValue={item ? (item.dropId ?? "") : (data.drops.find(drop => drop.status === "LIVE")?.id ?? "")}>
-            <option value="">No drop</option>{data.drops.map(drop => <option value={drop.id} key={drop.id}>{drop.title}</option>)}
-            {item?.dropId && !data.drops.some(drop => drop.id === item.dropId) && <option value={item.dropId}>Current drop</option>}
-          </select></label></div>
-        <div className="field-grid"><Stepper label={category === "Pants" ? "Waist (in)" : "Pit (in)"} value={pit} onChange={setPit} /><Stepper label={category === "Pants" ? "Outseam (in)" : "Labuh (in)"} value={length} onChange={setLength} /></div>
-        <fieldset><legend>Condition grade</legend><div className="grade-pills">{Object.entries(grades).map(([key, value]) => <button type="button" aria-pressed={key === grade} key={key} className={key === grade ? "selected" : ""} onClick={() => setGrade(key as keyof typeof grades)}>{value}</button>)}</div></fieldset>
-        <label>Condition notes<textarea name="conditionNotes" maxLength={1000} rows={2} defaultValue={item?.conditionNotes} /></label>
-        <fieldset><legend>Photos</legend><div className="photo-fields">
+      <fieldset className="stack" aria-label="Garment listing" disabled={busy || !!pendingPublish}>
+        <fieldset className="stack quick-list-group"><legend>Listing details</legend>
+          <div className="order-ref"><span>{item ? "Item code" : "Next item code"}</span><strong>{item?.code ?? `B-${String(data.seller.nextItemNumber).padStart(3, "0")}`}</strong></div>
+          <label>Garment title<input name="title" required maxLength={100} defaultValue={item?.title} placeholder="Carhartt Detroit Work Jacket" /></label>
+          <div className="field-grid"><label>Brand<input name="brand" required maxLength={70} defaultValue={item?.brand} /></label><label>Price (RM)<input name="price" required type="number" min=".01" max="999999" step=".01" inputMode="decimal" defaultValue={item?.price} /></label></div>
+          <div className="field-grid"><label>Category<select name="category" value={category} onChange={event => setCategory(event.target.value)}>{categories.map(entry => <option key={entry}>{entry}</option>)}</select></label>
+            <label>Drop<select name="dropId" defaultValue={item ? (item.dropId ?? "") : (data.drops.find(drop => drop.status === "LIVE")?.id ?? "")}>
+              <option value="">No drop</option>{data.drops.map(drop => <option value={drop.id} key={drop.id}>{drop.title}</option>)}
+              {item?.dropId && !data.drops.some(drop => drop.id === item.dropId) && <option value={item.dropId}>Current drop</option>}
+            </select></label></div>
+        </fieldset>
+        <fieldset className="quick-list-group"><legend>Measurements</legend>
+          <div className="field-grid measurement-fields"><Stepper label={category === "Pants" ? "Flat waist (in)" : "Pit-to-pit (in)"} value={pit} onChange={setPit} /><Stepper label={category === "Pants" ? "Outseam (in)" : "Labuh (in)"} value={length} onChange={setLength} /></div>
+        </fieldset>
+        <fieldset className="stack quick-list-group"><legend>Condition</legend>
+          <fieldset><legend>Condition grade</legend><div className="grade-pills">{Object.entries(grades).map(([key, value]) => <button type="button" aria-pressed={key === grade} key={key} className={key === grade ? "selected" : ""} onClick={() => setGrade(key as keyof typeof grades)}>{value}</button>)}</div></fieldset>
+          <label>Condition notes<textarea name="conditionNotes" maxLength={1000} rows={2} defaultValue={item?.conditionNotes} /></label>
+        </fieldset>
+        <fieldset className="stack quick-list-group"><legend>Photos</legend><div className="photo-fields">
           {["Front", "Back", "Tag"].map((label, i) => <label className="file-field" key={label}>
             {i === 0 && previewColor && preview ? <img src={preview} alt="" style={{ backgroundColor: previewColor }} /> :
               photos[i] ? <GarmentPhoto src={photos[i]!} alt="" /> : <ImagePlus size={21} strokeWidth={1.5} />}
@@ -180,50 +216,70 @@ export function QuickList({ data, item, onClose, onListed }: { data: DashboardDa
               const file = event.target.files?.[0]; event.target.value = ""; if (file) void attach(file, i);
             }} />
           </label>)}
-        </div></fieldset>
-        {newFront && preview && <fieldset className="front-background" disabled={busy || uploading > 0}>
-          <legend>Front photo background</legend>
-          <div className="grade-pills">
-            {(Object.keys(garmentBackgrounds) as GarmentBackground[]).map(option => {
-              const selected = option === (useOriginal ? "Original" : background);
-              return <button type="button" key={option} aria-pressed={selected} className={selected ? "selected" : ""}
-                disabled={option !== "Original" && frontCutout?.image === null} onClick={() => setBackground(option)}>{option}</button>;
-            })}
-          </div>
-          <div role="status" className="muted">
-            {preparing ? "Preparing the cutout. You can use Original now."
-              : frontCutout?.image === null ? "Background removal was unavailable. You can use Original or try another front photo."
-                : "Check that the garment and any flaws are visible. Photos of the garment on its own work best."}
-          </div>
-          <img className="front-background-preview" src={preview} alt="Front photo preview" style={{ backgroundColor: previewColor }} />
-        </fieldset>}
-        {(photos[0] || photos[1]) && <fieldset className="pin-editor">
-          <legend>Flaw pins</legend><p className="muted">Tap the image to mark a flaw and describe it below.</p>
-          <div className="grade-pills" aria-label="Photo to mark">
+        </div>
+          {newFront && preview && <fieldset className="front-background" disabled={busy || uploading > 0}>
+            <legend>Front photo background</legend>
+            <div className="grade-pills">
+              {(Object.keys(garmentBackgrounds) as GarmentBackground[]).map(option => {
+                const selected = option === (useOriginal ? "Original" : background);
+                return <button type="button" key={option} aria-pressed={selected} className={selected ? "selected" : ""}
+                  disabled={option !== "Original" && frontCutout?.image === null} onClick={() => setBackground(option)}>{option}</button>;
+              })}
+            </div>
+            <div role="status" className="muted">
+              {preparing ? "Preparing the cutout. You can use Original now."
+                : frontCutout?.image === null ? "Background removal was unavailable. You can use Original or try another front photo."
+                  : "Check that the garment and any flaws are visible. Photos of the garment on its own work best."}
+            </div>
+            <img className="front-background-preview" src={preview} alt="Front photo preview" style={{ backgroundColor: previewColor }} />
+          </fieldset>}
+        </fieldset>
+        {(photos[0] || photos[1]) && <fieldset className="pin-editor quick-list-group">
+          <legend>Flaw pins</legend><p id={pinInstructions} className="muted">Select a spot on the photo or press Enter on it to add a pin. Focus a pin and use arrow keys to move it. Hold Shift for larger steps.</p>
+          <div className="grade-pills" role="group" aria-label="Photo to mark">
             {(["front", "back"] as const).map((photo, i) => <button type="button" key={photo}
               disabled={!photos[i]} aria-pressed={pinPhoto === photo} className={pinPhoto === photo ? "selected" : ""}
-              onClick={() => { setPinPhoto(photo); setActivePin(null); }}>{photo === "front" ? "Front" : "Back"}</button>)}
+              onClick={() => { setPinPhoto(photo); setActivePin(null); setPinFeedback(""); }}>{photo === "front" ? "Front" : "Back"}</button>)}
           </div>
           {photos[pinPhoto === "front" ? 0 : 1] && <>
-          <div className="pin-canvas">
-            <button type="button" aria-label={`Place a flaw pin on the ${pinPhoto} photo`} onClick={event => {
-              if (pins.length >= 12) return;
-              const bounds = event.currentTarget.getBoundingClientRect();
-              const clamp = (value: number) => Math.round(Math.min(100, Math.max(0, value)) * 100) / 100;
-              const x = event.detail ? clamp((event.clientX - bounds.left) / bounds.width * 100) : 50;
-              const y = event.detail ? clamp((event.clientY - bounds.top) / bounds.height * 100) : 50;
-              setPins([...pins, { x, y, note: "", photo: pinPhoto }]); setActivePin(pins.length);
-            }}><img src={(pinPhoto === "front" ? preview : photos[1])!} style={pinPhoto === "front" ? { backgroundColor: previewColor } : undefined}
-              alt={`${pinPhoto === "front" ? "Front" : "Back"} garment photo for marking flaws`} /></button>
-            {pins.map((pin, i) => (pin.photo ?? "front") === pinPhoto && <button type="button" key={i} className="flaw-pin" aria-label={`Edit flaw ${i + 1}`} aria-pressed={activePin === i} style={{ left: `${pin.x}%`, top: `${pin.y}%` }} onClick={() => setActivePin(i)}>{i + 1}</button>)}
-          </div>
-          {activePin !== null && pins[activePin] && <div className="pin-editor-field"><label>Flaw {activePin + 1} note<input required maxLength={180} value={pins[activePin].note}
-            onChange={event => setPins(pins.map((pin, i) => i === activePin ? { ...pin, note: event.target.value } : pin))} /></label>
-            <button className="icon-button" type="button" aria-label="Remove flaw pin" onClick={() => { setPins(pins.filter((_, i) => i !== activePin)); setActivePin(null); }}><Trash2 size={18} strokeWidth={1.5} /></button></div>}
+            <div className="pin-canvas">
+              <button ref={pinCanvas} type="button" aria-label={`Place a flaw pin on the ${pinPhoto} photo`} aria-describedby={pinInstructions} aria-disabled={pins.length >= 12} onClick={event => {
+                if (pins.length >= 12) return;
+                const bounds = event.currentTarget.getBoundingClientRect();
+                if (!bounds.width || !bounds.height) return;
+                const x = event.detail ? pinCoordinate((event.clientX - bounds.left) / bounds.width * 100) : 50;
+                const y = event.detail ? pinCoordinate((event.clientY - bounds.top) / bounds.height * 100) : 50;
+                focusNextMarker.current = !event.detail;
+                setPinFeedback("");
+                setPins([...pins, { x, y, note: "", photo: pinPhoto }]); setActivePin(pins.length);
+              }}><img src={(pinPhoto === "front" ? preview : photos[1])!} style={pinPhoto === "front" ? { backgroundColor: previewColor } : undefined}
+                alt={`${pinPhoto === "front" ? "Front" : "Back"} garment photo for marking flaws`} /></button>
+              {pins.map((pin, i) => (pin.photo ?? "front") === pinPhoto && <button type="button" key={i} ref={activePin === i ? activeMarker : undefined}
+                className="flaw-pin" aria-label={`Edit flaw ${i + 1}`} aria-pressed={activePin === i} style={{ left: `${pin.x}%`, top: `${pin.y}%` }}
+                onClick={() => setActivePin(i)} onKeyDown={event => {
+                  const direction = pinDirections[event.key as keyof typeof pinDirections];
+                  if (!direction) return;
+                  event.preventDefault();
+                  movePin(i, direction.offset, event.shiftKey ? 10 : 1);
+                }}>{i + 1}</button>)}
+            </div>
+            {activePin !== null && pins[activePin] && <>
+              <div className="pin-editor-field"><label>Flaw {activePin + 1} note<input required maxLength={180} value={pins[activePin].note}
+                onChange={event => setPins(pins.map((pin, i) => i === activePin ? { ...pin, note: event.target.value } : pin))} /></label>
+                <button className="icon-button" type="button" aria-label="Remove flaw pin" onClick={() => {
+                  setPins(pins.filter((_, i) => i !== activePin)); setActivePin(null); setPinFeedback(""); pinCanvas.current?.focus();
+                }}><Trash2 size={18} strokeWidth={1.5} /></button></div>
+              <div className="pin-position-actions" role="group" aria-label={`Position flaw ${activePin + 1}`}>
+                {Object.values(pinDirections).map(({ offset, label, Icon }) =>
+                  <button key={label} className="icon-button" type="button" aria-label={label} onClick={() => movePin(activePin, offset)}><Icon size={17} aria-hidden="true" /></button>
+                )}
+              </div>
+            </>}
           </>}
         </fieldset>}
       </fieldset>
-      {error && <Notice>{error}</Notice>}
+      <span className="sr-only" role="status">{pinFeedback}</span>
+      <div className="quick-list-alert" role="alert">{(error || pendingPublish) && <p className="notice">{error || publicationUnconfirmed}</p>}</div>
       {pendingPublish
         ? <button className="button primary" type="button" onClick={retryPublish} disabled={busy}>{busy ? "Checking…" : "Retry the same publish request"}</button>
         : <button className="button primary" disabled={busy || !!uploading || (preparing && !useOriginal)}>

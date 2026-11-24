@@ -1,14 +1,25 @@
 import Link from "next/link";
 import { ArrowUpRight, Search, Store } from "lucide-react";
 import { Footer, Header } from "@/components/common";
-import { readShopDirectory } from "@/lib/shop-directory";
+import { readDirectoryPage } from "./shop-directory";
 
 export const dynamic = "force-dynamic";
 
-export default async function Home({ searchParams }: { searchParams: Promise<{ q?: string | string[] }> }) {
-  const { q } = await searchParams;
+type SearchParams = Record<string, string | string[] | undefined>;
+
+export default async function Home({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const { q, page: pageParam } = await searchParams;
   const query = (Array.isArray(q) ? q[0] : q)?.trim() ?? "";
-  const shops = await readShopDirectory(query);
+  const requestedPage = Number(Array.isArray(pageParam) ? pageParam[0] : pageParam);
+  const { shops, total, page, pageCount } = await readDirectoryPage(
+    query, Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1,
+  );
+  const pageLink = (target: number) => {
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    if (target > 1) params.set("page", String(target));
+    return params.size ? `/?${params}` : "/";
+  };
 
   return <>
     <Header />
@@ -22,6 +33,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
         </div>
         {query && <Link className="text-button" href="/">Clear search</Link>}
       </form>
+      {pageCount > 1 && <p className="shop-page-count muted">{total.toLocaleString("en-MY")} {query ? "matching shops" : "shops"}</p>}
       {shops.length ? <ul className="shop-grid" aria-label="Shops">
         {shops.map(shop => <li key={shop.storeSlug}>
           <Link className="shop-card surface" href={`/${shop.storeSlug}`}>
@@ -38,6 +50,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
         <h2>{query ? "No matching shops" : "No shops yet"}</h2>
         {query && <p>Try another shop name or handle.</p>}
       </div>}
+      {pageCount > 1 && <nav className="shop-pagination" aria-label="Shop directory pages">
+        {page > 1 && <Link className="button" href={pageLink(page - 1)}>Previous page</Link>}
+        <p className="muted">Page {page} of {pageCount}</p>
+        {page < pageCount && <Link className="button" href={pageLink(page + 1)}>Next page</Link>}
+      </nav>}
     </main>
     <Footer />
   </>;

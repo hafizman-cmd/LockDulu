@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { ArrowUpRight, LayoutGrid, LogOut, ShieldCheck, Store, Tag, CirclePause } from "lucide-react";
 import { AdminLogin } from "@/components/admin-login";
-import { AdminShopActions } from "@/components/admin-shop-actions";
+import { AdminShopActions, AdminShopFeedback } from "@/components/admin-shop-actions";
 import { Footer, Header, Notice } from "@/components/common";
-import { adminOverview, adminTransferCases } from "@/lib/admin";
+import { adminTransferCases } from "@/lib/admin";
 import { adminPasswordMaxLength, adminPath, adminSignInEnabled, currentAdmin } from "@/lib/admin-auth";
 import { money, rejectionMessage, transferEventLabels, whatsapp } from "@/lib/catalog";
 import { logoutAdmin } from "./actions";
+import { readShopOverview } from "./shop-overview";
 
 export const metadata = { title: "Admin dashboard", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
@@ -19,7 +20,10 @@ function pageNumber(value: string | undefined) {
   return Number.isSafeInteger(page) && page > 0 ? page : 1;
 }
 
-export default async function AdminDashboardPage({ searchParams }: { searchParams: Promise<{ page?: string; helpPage?: string }> }) {
+type SearchParams = Record<string, string | string[] | undefined>;
+const first = (value: SearchParams[string]) => Array.isArray(value) ? value[0] : value;
+
+export default async function AdminDashboardPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   if (!await currentAdmin()) {
     return <>
       <Header />
@@ -35,10 +39,22 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
   }
 
   const params = await searchParams;
-  const [overview, cases] = await Promise.all([adminOverview(pageNumber(params.page)), adminTransferCases(pageNumber(params.helpPage))]);
-  const pageHref = (shopPage: number, helpPage: number, section: string) => `${adminPath}?page=${shopPage}&helpPage=${helpPage}#${section}`;
+  const handle = (first(params.handle) ?? "").trim().replace(/^@/, "").trim().toLowerCase().slice(0, 80);
+  const requestedStatus = first(params.status);
+  const status = requestedStatus === "ACTIVE" || requestedStatus === "HELD" ? requestedStatus : undefined;
+  const [overview, cases] = await Promise.all([
+    readShopOverview(pageNumber(first(params.page)), handle, status),
+    adminTransferCases(pageNumber(first(params.helpPage))),
+  ]);
+  const pageHref = (shopPage: number, helpPage: number, section: string, keepFilters = true) => {
+    const query = new URLSearchParams({ page: String(shopPage), helpPage: String(helpPage) });
+    if (keepFilters && handle) query.set("handle", handle);
+    if (keepFilters && status) query.set("status", status);
+    return `${adminPath}?${query}#${section}`;
+  };
+  const filtered = !!(handle || status);
   const metrics = [
-    { label: "Registered shops", value: overview.shops, icon: Store },
+    { label: "Shops excluding deleted", value: overview.shops, icon: Store },
     { label: "Listings", value: overview.listings, icon: Tag },
     { label: "Active shops", value: overview.activeShops, icon: ShieldCheck },
     { label: "Shops on hold", value: overview.heldShops, icon: CirclePause },
@@ -94,26 +110,47 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
 
       <section className="surface admin-shops" aria-labelledby="manage-shops">
         <h2 id="manage-shops"><LayoutGrid size={20} aria-hidden="true" /> Manage shops</h2>
-        {overview.shopRows.length ? <div className="admin-table-scroll" role="region" aria-label="Shops table" tabIndex={0}>
-          <table>
-            <thead><tr><th scope="col">Shop</th><th scope="col">Joined</th><th scope="col">Listings</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
-            <tbody>{overview.shopRows.map(shop => <tr key={shop.id}>
-              <th scope="row">
-                {shop.status === "HELD" ? shop.storeName : <Link href={`/${shop.storeSlug}`}>
-                  {shop.storeName} <ArrowUpRight size={14} aria-hidden="true" />
-                </Link>}
-                <span className="muted">@{shop.storeSlug}</span>
-              </th>
-              <td><time dateTime={shop.createdAt.toISOString()}>{dates.format(shop.createdAt)}</time></td>
-              <td>{numbers.format(shop._count.garments)}</td>
-              <td><span className={`badge ${shop.status === "HELD" ? "badge-pending_verification" : "badge-available"}`}>{shop.status === "HELD" ? "On hold" : "Active"}</span></td>
-              <td>
-                <AdminShopActions shopId={shop.id} shopName={shop.storeName} held={shop.status === "HELD"} unresolvedOrders={shop.unresolvedOrders} />
-                {shop.unresolvedOrders > 0 && <p className="muted">{shop.unresolvedOrders} unresolved {shop.unresolvedOrders === 1 ? "order" : "orders"}</p>}
-              </td>
-            </tr>)}</tbody>
-          </table>
-        </div> : <p className="muted">No shops have registered yet.</p>}
+        <form className="admin-shop-filters" action={`${adminPath}#manage-shops`} role="search" aria-label="Shop filters">
+          <input type="hidden" name="helpPage" value={cases.page} />
+          <div className="admin-filter-field">
+            <label htmlFor="admin-handle">Shop handle</label>
+            <input key={handle} id="admin-handle" name="handle" type="search" maxLength={80} defaultValue={handle} placeholder="@shop.handle" />
+          </div>
+          <div className="admin-filter-field">
+            <label htmlFor="admin-status">Status</label>
+            <select key={status ?? "all"} id="admin-status" name="status" defaultValue={status ?? ""}>
+              <option value="">All statuses</option><option value="ACTIVE">Active</option><option value="HELD">On hold</option>
+            </select>
+          </div>
+          <button className="button primary" type="submit">Apply filters</button>
+          {filtered && <Link className="button" href={pageHref(1, cases.page, "manage-shops", false)}>Clear filters</Link>}
+        </form>
+        <p className="muted admin-shop-result">{numbers.format(overview.matches)} {overview.matches === 1 ? "shop" : "shops"}{filtered ? " match your filters" : ""}</p>
+        <AdminShopFeedback>
+          {overview.shopRows.length ? <ul className="admin-shop-list" role="list" aria-label="Shops">
+            {overview.shopRows.map(shop => {
+              const held = shop.status === "HELD";
+              const unresolved = shop._count.orders;
+              return <li className="surface admin-shop-card" key={shop.id}>
+                <div className="admin-shop-identity">
+                  <div>
+                    <h3>{held ? shop.storeName : <Link href={`/${shop.storeSlug}`}>{shop.storeName} <ArrowUpRight size={14} aria-hidden="true" /></Link>}</h3>
+                    <p className="muted">@{shop.storeSlug}</p>
+                  </div>
+                  <span className={`badge ${held ? "badge-pending_verification" : "badge-available"}`}>{held ? "On hold" : "Active"}</span>
+                </div>
+                <p className="muted">Joined <time dateTime={shop.createdAt.toISOString()}>{dates.format(shop.createdAt)}</time></p>
+                <dl className="admin-shop-counts">
+                  <div><dt>Listings</dt><dd>{numbers.format(shop._count.garments)}</dd></div>
+                  <div><dt>Pending receipts</dt><dd>{numbers.format(shop.pendingReceipts)}</dd></div>
+                  <div><dt>Open shipments</dt><dd>{numbers.format(shop.openShipments)}</dd></div>
+                </dl>
+                <AdminShopActions shopId={shop.id} shopName={shop.storeName} held={held} unresolvedOrders={unresolved} />
+                {unresolved > 0 && <p className="muted">Resolve {numbers.format(unresolved)} open {unresolved === 1 ? "order" : "orders"} before deleting this shop.</p>}
+              </li>;
+            })}
+          </ul> : <p className="muted">{filtered ? "Try another handle or status." : "No active or held shops yet."}</p>}
+        </AdminShopFeedback>
         {overview.pageCount > 1 && <nav className="admin-pagination" aria-label="Shop pages">
           {overview.page > 1 && <Link className="button" href={pageHref(overview.page - 1, cases.page, "manage-shops")}>Previous</Link>}
           <p className="muted">Page {overview.page} of {overview.pageCount}</p>

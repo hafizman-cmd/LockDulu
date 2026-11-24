@@ -241,7 +241,7 @@ export function Locker() {
       </div>}
     </main>
     <Footer />
-    {parcel && <Sheet title="Request Hold Box dispatch" onClose={() => { if (!dispatching) setParcel(null); }}>
+    {parcel && <Sheet title="Request Hold Box dispatch" closeDisabled={dispatching} onClose={() => setParcel(null)}>
       <form className="stack" onSubmit={dispatch}>
         <p><strong>Delivery address</strong><br />{parcel.orders[0]?.shippingAddress}</p>
         <p className="muted">Choose pieces for this address. Contact the seller first if the address needs to change.</p>
@@ -259,7 +259,7 @@ export function Locker() {
         <button className="button primary" disabled={dispatching || !parcel.selected.length}>{dispatching ? "Requesting…" : "Confirm dispatch request"}</button>
       </form>
     </Sheet>}
-    {reportOrder && <Sheet title="Report a bank transfer" onClose={() => { if (!reporting) setReportOrder(null); }}>
+    {reportOrder && <Sheet title="Report a bank transfer" closeDisabled={reporting} onClose={() => setReportOrder(null)}>
       <form className="stack" onSubmit={submitReport}>
         <p>Send the bank reference for order {reportOrder.id}. The seller can check the transfer and contact you on WhatsApp. The garment may already belong to another buyer.</p>
         <label>Bank transfer reference<input name="reference" required minLength={3} maxLength={120} disabled={reporting} /></label>
@@ -267,7 +267,7 @@ export function Locker() {
         <button className="button primary" disabled={reporting}>{reporting ? "Reporting…" : "Send transfer reference"}</button>
       </form>
     </Sheet>}
-    {followUp && <Sheet title={transferActions[followUp.type]} onClose={() => { if (!reporting) setFollowUp(null); }}>
+    {followUp && <Sheet title={transferActions[followUp.type]} closeDisabled={reporting} onClose={() => setFollowUp(null)}>
       <form className="stack" onSubmit={submitFollowUp}>
         <p>Order {followUp.order.id}</p>
         {followUp.type === "CORRECT_REFERENCE" ? <>

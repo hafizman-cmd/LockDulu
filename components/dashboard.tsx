@@ -223,8 +223,8 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
             <div className="order-total"><strong>{money(order.totalAmount)}</strong><span className="badge badge-pending_verification">{order.fulfillmentType === "HOLD_BOX" ? "Hold Box" : "Ship Now"}</span></div>
           </div>
           {order.hasReceipt && <details className="receipt-details"><summary><ImagePlus size={17} strokeWidth={1.5} /> Receipt screenshot <ChevronDown size={17} strokeWidth={1.5} /></summary>
-            <button className="receipt-preview" onClick={() => setReceiptOpen(order.id)} aria-label="Open full-size payment receipt">
-              <img src={`/api/receipt/${order.id}`} alt="Payment receipt screenshot" loading="lazy" />
+            <button className="receipt-preview" onClick={() => setReceiptOpen(order.id)}>
+              <GarmentPhoto src={`/api/receipt/${order.id}`} alt="Open full-size payment receipt" loading="lazy" unavailableLabel="Receipt image unavailable. Open to try again." />
             </button>
           </details>}
           <div className="order-actions">
@@ -347,7 +347,7 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
     {!held && listing && <QuickList data={data} item={listing === true ? undefined : listing} onClose={() => setListing(null)} onListed={async code => {
       setListing(null); setTab("inventory"); setFilter("all"); setVisibility("all"); setQuery(""); setError(""); setSuccess(listing === true ? `${code} was listed.` : `${code} was updated.`); await refresh();
     }} />}
-    {!held && deleting && <Sheet title="Delete listing?" onClose={() => { if (!busy) setDeleting(null); }}>
+    {!held && deleting && <Sheet title="Delete listing?" closeDisabled={busy} onClose={() => setDeleting(null)}>
       <div className="stack"><p>Delete {deleting.code} · {deleting.title}? This removes the listing from your store and inventory.</p>
         <p className="muted">Order and receipt history remains available. Listings with an active reservation, receipt review or Hold Box cannot be deleted.</p>
         <div className="button-row"><button className="button" disabled={busy} onClick={() => setDeleting(null)}>Cancel</button>
@@ -361,7 +361,7 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
           }}>{busy ? "Deleting…" : "Delete listing"}</button></div>
       </div>
     </Sheet>}
-    {decision && <Sheet title={decision.type === "ship" ? (decision.legacy ? "Review shipment status" : "Mark shipment sent?") : decision.type === "transfer" ? "Update transfer report" : decision.paid ? "Confirm payment?" : "Reject this receipt?"} onClose={() => { if (!busy) setDecision(null); }}>
+    {decision && <Sheet title={decision.type === "ship" ? (decision.legacy ? "Review shipment status" : "Mark shipment sent?") : decision.type === "transfer" ? "Update transfer report" : decision.paid ? "Confirm payment?" : "Reject this receipt?"} closeDisabled={busy} onClose={() => setDecision(null)}>
       <form className="stack" onSubmit={event => { event.preventDefault(); void confirm(false, new FormData(event.currentTarget)); }}>
         {decision.type === "ship" ? <>
           <p>{decision.legacy ? `Has the order for ${decision.buyer} already shipped? We’ll record the review date and show the shipment date as unknown.` :
@@ -395,6 +395,8 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
         </div>
       </form>
     </Sheet>}
-    {receiptOpen && <Sheet title="Payment receipt" className="image-sheet" onClose={() => setReceiptOpen(null)}><img src={`/api/receipt/${receiptOpen}`} alt="High-resolution payment receipt" /></Sheet>}
+    {receiptOpen && <Sheet title="Payment receipt" className="image-sheet" onClose={() => setReceiptOpen(null)}>
+      <GarmentPhoto src={`/api/receipt/${receiptOpen}`} alt="Full-size payment receipt" unavailableLabel="Receipt image unavailable" />
+    </Sheet>}
   </>;
 }

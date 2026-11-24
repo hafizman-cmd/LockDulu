@@ -2,7 +2,7 @@ import { currentSeller } from "@/lib/security";
 import { dashboardData } from "@/lib/seller";
 import { Dashboard, SellerLogin } from "@/components/dashboard";
 
-export const metadata = { title: "Seller dashboard" };
+export const metadata = { title: "Seller dashboard", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {

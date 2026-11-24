@@ -1,10 +1,10 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Clock3, Globe2, Grid2x2, ScanLine, SlidersHorizontal, Tag } from "lucide-react";
 import type { readStore } from "@/lib/inventory";
-import { categories, measurements, money, timer } from "@/lib/catalog";
+import { categories, grades, measurements, money, timer } from "@/lib/catalog";
 import { ActiveLock, AvailabilityNotice, Footer, GarmentPhoto, Header, Sheet, Stage } from "./common";
 import { json, readLocal, RequestError, useClock, usePolling, writeLocal } from "./client";
 
@@ -35,6 +35,7 @@ export function Storefront({ initial }: { initial: StoreData }) {
   const [draft, setDraft] = useState<Fit | null>(null);
   const [fitError, setFitError] = useState("");
   const [selection, setSelection] = useState("all");
+  const browseSelect = useRef<HTMLSelectElement>(null);
   const [failedBanner, setFailedBanner] = useState<string | null>(null);
   useEffect(() => {
     setFit({ ...emptyFit, ...readLocal<Partial<Fit>>("lockdulu.fit", {}) });
@@ -56,6 +57,24 @@ export function Storefront({ initial }: { initial: StoreData }) {
       ? fits(item.pitInches, fit.minWaist, fit.maxWaist) && fits(item.lengthInches, fit.minOutseam, fit.maxOutseam)
       : fits(item.pitInches, fit.minPit, fit.maxPit) && fits(item.lengthInches, fit.minLength, fit.maxLength);
   });
+  const hasFilters = filter !== "all" || category !== "All pieces" || onlyFit;
+  const emptyTitle = drop && !selectableItems.length ? "This drop has no pieces yet"
+    : !data.items.length ? "This shop has no pieces yet"
+    : !selectableItems.length && filter === "available" ? "No pieces available right now"
+    : !selectableItems.length && filter === "no-drop" ? "All pieces belong to a drop"
+    : "No pieces match your filters";
+
+  function applyOnlyFit(enabled: boolean) {
+    setOnlyFit(enabled);
+    writeLocal("lockdulu.onlyFit", enabled);
+  }
+
+  function clearFilters() {
+    setSelection("all");
+    setCategory("All pieces");
+    applyOnlyFit(false);
+    browseSelect.current?.focus();
+  }
 
   return <>
     <Header storeSlug={slug} />
@@ -77,7 +96,7 @@ export function Storefront({ initial }: { initial: StoreData }) {
       </section>
       {stale && <AvailabilityNotice serverTime={data.serverTime} />}
       {!data.store.paymentReady && data.items.length > 0 && <p className="muted">You can browse this shop while the seller sets up payments.</p>}
-      <label className="drop-selector">Browse pieces <select value={filter} onChange={event => { setSelection(event.target.value); setCategory("All pieces"); }}>
+      <label className="drop-selector">Browse pieces <select ref={browseSelect} value={filter} onChange={event => { setSelection(event.target.value); setCategory("All pieces"); }}>
         <option value="all">All pieces</option>
         <option value="available">Available now</option>
         <option value="no-drop">No drop</option>
@@ -87,29 +106,32 @@ export function Storefront({ initial }: { initial: StoreData }) {
       <section id="pieces" className="pieces">
         <div className="section-heading"><div><span className="eyebrow"><ScanLine size={15} strokeWidth={1.5} /> {upcoming ? "Drop preview" : "Inventory"}</span>
           <h2>{drop?.title ?? (filter === "available" ? "Available now" : filter === "no-drop" ? "Pieces with no drop" : "All pieces")}</h2></div>
-          <span className="piece-count">{visible.length} {visible.length === 1 ? "piece" : "pieces"}</span>
+          <span className="piece-count" role="status" aria-atomic="true">{visible.length} {visible.length === 1 ? "piece" : "pieces"}</span>
         </div>
         <div className="filter-bar glass">
-          <div className="category-list" aria-label="Garment category">
-            {["All pieces", ...categories.filter(kind => selectableItems.some(item => item.category === kind)).map(String)].map(kind =>
+          <div className="category-list" role="group" aria-label="Garment category">
+            {["All pieces", ...categories.filter(kind => category === kind || selectableItems.some(item => item.category === kind))].map(kind =>
               <button key={kind} className={category === kind ? "selected" : ""} aria-pressed={category === kind} onClick={() => setCategory(kind)}>{kind}</button>
             )}
           </div>
           <div className="fit-actions">
             <button className="fit-config" onClick={() => { setFitError(""); setDraft(fit); }}><SlidersHorizontal size={17} strokeWidth={1.5} /> My Fit</button>
-            <label className="toggle"><input type="checkbox" checked={onlyFit} onChange={event => {
-              setOnlyFit(event.target.checked); writeLocal("lockdulu.onlyFit", event.target.checked);
-            }} /><span />My Fit Only</label>
+            <label className="toggle"><input type="checkbox" checked={onlyFit} onChange={event => applyOnlyFit(event.target.checked)} /><span />My Fit Only</label>
+            {hasFilters && <button type="button" className="clear-filters" onClick={clearFilters}>Clear all filters</button>}
           </div>
         </div>
         {visible.length ? <div className="garment-grid">
-          {visible.map(item => <Link key={item.id} href={`/item/${item.id}`} className="garment-card" aria-label={`${item.title}, ${money(item.price)}, ${measurements(item)}`}>
-            <GarmentPhoto className="card-photo" src={item.images[0]} alt={item.title} loading="lazy" />
-            <div className="card-meta"><h3>{item.title}</h3><div className="card-row"><strong>{money(item.price)}</strong><Stage item={item} now={now} showCondition buyer /></div><p><span>{item.category === "Pants" ? "Waist × Outseam" : "Pit × Labuh"}</span><b>{measurements(item)}</b></p></div>
+          {visible.map(item => <Link key={item.id} href={`/item/${item.id}`} className="garment-card">
+            <GarmentPhoto className="card-photo" src={item.images[0]} alt="" loading="lazy" />
+            <div className="card-meta">
+              <h3>{item.title}</h3>
+              <div className="card-row"><strong>{money(item.price)}</strong><Stage item={item} now={now} buyer /></div>
+              <p><span>{item.category === "Pants" ? "Flat waist × Outseam" : "Pit-to-pit × Labuh"}</span><b>{measurements(item)}</b></p>
+              {item.status === "AVAILABLE" && item.locksOpen && <p>{grades[item.conditionGrade]}</p>}
+            </div>
           </Link>)}
         </div> : <div className="empty surface"><Globe2 size={25} strokeWidth={1.5} />
-          <h3>{!data.items.length ? "This shop has no pieces yet" : !selectableItems.length ? (drop ? "This drop has no pieces yet" : filter === "available" ? "No pieces available right now" : "All pieces belong to a drop") : "No matching pieces"}</h3>
-          {!!selectableItems.length && <button type="button" className="button" onClick={() => { setCategory("All pieces"); setOnlyFit(false); writeLocal("lockdulu.onlyFit", false); }}>Clear filters</button>}
+          <h3>{emptyTitle}</h3>
         </div>}
       </section>
     </main>
@@ -121,9 +143,9 @@ export function Storefront({ initial }: { initial: StoreData }) {
         if (fitFields.some(group => group.ranges.some(([min, max]) => draft[min] && draft[max] && Number(draft[min]) > Number(draft[max])))) {
           setFitError("Each minimum must be at or below its maximum."); return;
         }
-        setFit(draft); writeLocal("lockdulu.fit", draft); setOnlyFit(true); writeLocal("lockdulu.onlyFit", true); setDraft(null);
+        setFit(draft); writeLocal("lockdulu.fit", draft); applyOnlyFit(true); setDraft(null);
       }}>
-        <p className="muted">Set the garment measurements that fit you. Leave a field blank for an open range.</p>
+        <p className="muted">Use measurements from garments that fit you. Tops and pants have separate ranges. Leave either bound blank to keep it open.</p>
         {fitFields.map(group => <fieldset key={group.label}><legend>{group.label}</legend><div className="field-grid">
           {group.ranges.flatMap(([min, max, label]) => ([min, max] as const).map((key, index) => <label key={key}>{index === 0 ? "Min" : "Max"} {label} (in)
             <input type="number" inputMode="decimal" min="0" max="100" step=".1" value={draft[key]} onChange={event => setDraft({ ...draft, [key]: event.target.value })} />
