@@ -2,10 +2,11 @@ import type { Drop, Garment, Order, Prisma } from "@/generated/prisma/client";
 import { db, writeTransaction } from "./db.ts";
 import type { GarmentView, Pin, Quote } from "./catalog";
 import { HttpError } from "./http.ts";
+import { paymentConfigured, samplePaymentQr } from "./payment.ts";
 import { hashToken } from "./security.ts";
-import { activeShop, requireOrderSeller } from "./shop-status.ts";
+import { activeShop, existingShop, requireOrderSeller } from "./shop-status.ts";
 import type { z } from "zod";
-import type { delivery, receiptRejection } from "./validation";
+import type { buyerTransferUpdate, delivery, receiptRejection, sellerTransferUpdate } from "./validation";
 
 async function closeAbandonedOrders(tx: Prisma.TransactionClient, garmentIds: string[]) {
   if (!garmentIds.length) return;
@@ -56,12 +57,13 @@ export function garmentView(item: Garment & { drop: Drop | null }): GarmentView 
 }
 
 export const storeSelect = { storeName: true, storeSlug: true, bio: true, whatsappNumber: true } as const;
+const paymentSelect = { qrCodeUrl: true, qrAccountName: true, qrBankLabel: true } as const;
 
 export async function readStore(slug: string) {
   const storeSlug = slug.toLowerCase();
   const activeStore = { storeSlug, ...activeShop };
   const [seller, initialItems, initialDrops] = await Promise.all([
-    db().seller.findUnique({ where: activeStore, select: { ...storeSelect, bannerImageUrl: true, id: true } }),
+    db().seller.findUnique({ where: activeStore, select: { ...storeSelect, ...paymentSelect, bannerImageUrl: true, id: true } }),
     db().garment.findMany({ where: { seller: activeStore, hidden: false, deletedAt: null }, include: { drop: true }, orderBy: { code: "asc" } }),
     db().drop.findMany({ where: { seller: activeStore, status: { not: "ENDED" } }, orderBy: { scheduledAt: "asc" } }),
   ]);
@@ -81,13 +83,14 @@ export async function readStore(slug: string) {
       db().drop.findMany({ where: { sellerId: seller.id, seller: activeShop, status: { not: "ENDED" } }, orderBy: { scheduledAt: "asc" } }),
     ]);
   }
-  const { id: _sellerId, ...store } = seller;
-  return { store, items: items.map(garmentView), drops: drops.map(drop => ({ id: drop.id, title: drop.title, status: drop.status, scheduledAt: drop.scheduledAt.toISOString() })), serverTime: Date.now() };
+  const { storeName, bio, whatsappNumber, bannerImageUrl } = seller;
+  return { store: { storeName, storeSlug, bio, whatsappNumber, bannerImageUrl, paymentReady: paymentConfigured(seller) },
+    items: items.map(garmentView), drops: drops.map(drop => ({ id: drop.id, title: drop.title, status: drop.status, scheduledAt: drop.scheduledAt.toISOString() })), serverTime: Date.now() };
 }
 
 export async function readItem(id: string) {
   const where = { id, seller: activeShop, hidden: false, deletedAt: null };
-  const include = { drop: true, seller: { select: storeSelect } } as const;
+  const include = { drop: true, seller: { select: { ...storeSelect, ...paymentSelect } } } as const;
   let item = await db().garment.findUnique({ where, include });
   if (!item) return null;
   const now = Date.now();
@@ -100,7 +103,9 @@ export async function readItem(id: string) {
     ]);
     item = await db().garment.findUnique({ where, include });
   }
-  return item && { item: garmentView(item), store: item.seller, serverTime: Date.now() };
+  if (!item) return null;
+  const { storeName, storeSlug, bio, whatsappNumber } = item.seller;
+  return { item: garmentView(item), store: { storeName, storeSlug, bio, whatsappNumber, paymentReady: paymentConfigured(item.seller) }, serverTime: Date.now() };
 }
 
 function quote(order: Order, lockedUntil: Date): Quote {
@@ -111,10 +116,16 @@ function quote(order: Order, lockedUntil: Date): Quote {
   };
 }
 
-export async function lockItem(id: string, token: string) {
+export async function lockItem(id: string, token: string, checkPaymentImage?: (url: string) => Promise<void>) {
   const hash = hashToken(token);
-  const item = await db().garment.findUnique({ where: { id, seller: activeShop, hidden: false, deletedAt: null }, select: { sellerId: true } });
+  const item = await db().garment.findUnique({ where: { id, seller: activeShop, hidden: false, deletedAt: null },
+    select: { sellerId: true, lockSessionToken: true, lockedUntil: true, seller: { select: paymentSelect } } });
   if (!item) throw new HttpError("This garment could not be found.", 404);
+  const resuming = item.lockSessionToken === hash && item.lockedUntil && item.lockedUntil > new Date();
+  if (!resuming && paymentConfigured(item.seller) && item.seller.qrCodeUrl !== samplePaymentQr) {
+    if (!checkPaymentImage) throw new HttpError("This shop's payment QR could not be checked.", 503);
+    await checkPaymentImage(item.seller.qrCodeUrl);
+  }
   await openDueDrops(item.sellerId);
   return writeTransaction(async tx => {
     const now = new Date();
@@ -140,7 +151,9 @@ export async function lockItem(id: string, token: string) {
     }
     const garment = await tx.garment.findUniqueOrThrow({ where: { id }, include: { seller: true } });
     const seller = garment.seller;
-    if (!seller.qrCodeUrl) throw new HttpError("This store has not set up its payment QR yet.", 409);
+    if (resuming || !paymentConfigured(seller) || seller.qrCodeUrl !== item.seller.qrCodeUrl) {
+      throw new HttpError("This shop's payment setup is unavailable. Contact the seller or try again later.", 409);
+    }
     const order = await tx.order.create({ data: {
       sellerId: seller.id, buyerAccessHash: hash, garmentCode: garment.code, garmentTitle: garment.title, itemAmount: garment.price,
       shippingFee: seller.shippingFee, totalAmount: garment.price.plus(seller.shippingFee), holdBoxDays: seller.holdBoxDays,
@@ -165,6 +178,7 @@ export async function orderState(orderId: string, token: string) {
   const checkoutQuote = order.paymentStatus === "AWAITING_RECEIPT" && garment?.lockedUntil ? quote(order, garment.lockedUntil) : null;
   return {
     status: order.paymentStatus, code: order.garmentCode, serverTime: Date.now(), rejectionReason: order.rejectionReason,
+    paymentTotal: checkoutQuote && order.buyerPhone && paymentConfigured(order) ? order.totalAmount.toFixed(2) : null,
     quote: checkoutQuote,
     delivery: checkoutQuote && order.buyerPhone ? {
       buyerName: order.buyerName, buyerPhone: order.buyerPhone, shippingAddress: order.shippingAddress, fulfillmentType: order.fulfillmentType,
@@ -179,12 +193,94 @@ export async function preparePayment(orderId: string, token: string, details: z.
       id: orderId, buyerAccessHash: hash, paymentStatus: "AWAITING_RECEIPT", seller: activeShop,
       items: { some: { garment: { status: "LOCKED", lockSessionToken: hash, lockedUntil: { gt: new Date() } } } },
     } as const;
-    const order = await tx.order.findUnique({ where, select: { itemAmount: true, shippingFee: true } });
+    const order = await tx.order.findUnique({ where, select: { itemAmount: true, shippingFee: true, ...paymentSelect } });
     if (!order) throw new HttpError("Your reservation has ended. Check your order status before paying.", 409);
+    if (!paymentConfigured(order)) throw new HttpError("This order's payment setup is unavailable. Contact the seller.", 409);
+    const totalAmount = details.fulfillmentType === "HOLD_BOX" ? order.itemAmount : order.itemAmount.plus(order.shippingFee);
     await tx.order.update({ where, data: {
-      ...details, totalAmount: details.fulfillmentType === "HOLD_BOX" ? order.itemAmount : order.itemAmount.plus(order.shippingFee),
+      ...details, totalAmount,
     } });
+    return { total: totalAmount.toFixed(2) };
+  });
+}
+
+export async function reportTransfer(orderId: string, token: string, reference: string) {
+  await orderState(orderId, token);
+  return writeTransaction(async tx => {
+    const where = { id: orderId, buyerAccessHash: hashToken(token), seller: existingShop } as const;
+    const order = await tx.order.findUnique({ where, select: { paymentStatus: true, buyerPhone: true, transferReportedAt: true } });
+    if (!order) throw new HttpError("This checkout could not be found or the shop has closed.", 404);
+    if (order.transferReportedAt) return { ok: true };
+    if (!order.buyerPhone || (order.paymentStatus !== "EXPIRED" && order.paymentStatus !== "REJECTED")) {
+      throw new HttpError("This order is not eligible for a transfer report. Check your order status first.", 409);
+    }
+    await tx.order.update({ where, data: { transferReference: reference, transferReportedAt: new Date() } });
     return { ok: true };
+  });
+}
+
+async function saveTransferUpdate(tx: Prisma.TransactionClient, orderId: string, version: number, kind: string, data: Prisma.OrderUpdateInput, detail?: string) {
+  const now = new Date();
+  await tx.order.update({ where: { id: orderId, transferVersion: version, transferResolvedAt: null }, data: {
+    ...data, transferVersion: { increment: 1 },
+    transferEvents: { create: { version: version + 1, kind, createdAt: now, detail } },
+  } });
+  return { ok: true };
+}
+
+const malaysiaDate = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Kuala_Lumpur", dateStyle: "short" });
+
+export async function updateSellerTransfer(sellerId: string, orderId: string, version: number, update: z.infer<typeof sellerTransferUpdate>) {
+  return writeTransaction(async tx => {
+    await requireOrderSeller(tx, sellerId);
+    const order = await tx.order.findUnique({ where: { id: orderId, sellerId, transferVersion: version,
+      transferReportedAt: { not: null }, transferResolvedAt: null } });
+    if (!order) throw new HttpError("This transfer report has changed. Refresh before recording an update.", 409);
+    if (update.type === "TRANSFER_NOT_FOUND") {
+      if (order.transferResolution) throw new HttpError("Refresh the case before recording a new outcome.", 409);
+      return saveTransferUpdate(tx, orderId, version, update.type, { transferResolution: update.type });
+    }
+    if (order.transferResolution === "REFUNDED" && order.refundReference && !order.refundDisputedAt) {
+      throw new HttpError("The buyer is checking the reported refund.", 409);
+    }
+    if (Number(update.amount) <= 0 || order.totalAmount.lessThan(update.amount)) {
+      throw new HttpError("Enter a refund amount greater than zero and no more than the order total.");
+    }
+    if (update.sentOn < malaysiaDate.format(order.createdAt) || update.sentOn > malaysiaDate.format(new Date())) {
+      throw new HttpError("Enter a refund date between the order date and today.");
+    }
+    const { amount, sentOn, reference, note } = update;
+    return saveTransferUpdate(tx, orderId, version, update.type, {
+      transferResolution: update.type, refundAmount: amount, refundSentOn: sentOn,
+      refundReference: reference, refundNote: note || null, refundDisputedAt: null,
+    }, `RM${Number(amount).toFixed(2)} · ${sentOn} · Reference ${reference}`);
+  });
+}
+
+export async function updateBuyerTransfer(orderId: string, token: string, version: number, update: z.infer<typeof buyerTransferUpdate>) {
+  return writeTransaction(async tx => {
+    const order = await tx.order.findUnique({ where: { id: orderId, buyerAccessHash: hashToken(token), transferReportedAt: { not: null } } });
+    if (!order) throw new HttpError("This transfer report could not be found.", 404);
+    if (order.transferResolvedAt || order.transferVersion !== version) {
+      throw new HttpError("This transfer report has changed. Refresh My orders before continuing.", 409);
+    }
+    if (update.type === "REQUEST_HELP") {
+      if (order.transferEscalatedAt) return { ok: true };
+      return saveTransferUpdate(tx, orderId, version, update.type, { transferEscalatedAt: new Date() });
+    }
+    if (update.type === "CORRECT_REFERENCE") {
+      if (order.transferResolution !== "TRANSFER_NOT_FOUND") throw new HttpError("The seller hasn’t asked for a corrected reference.", 409);
+      return saveTransferUpdate(tx, orderId, version, update.type, { transferResolution: null, transferReference: update.reference }, update.reference);
+    }
+    if (order.transferResolution !== "REFUNDED") throw new HttpError("The seller hasn’t reported a refund.", 409);
+    if (update.type === "DISPUTE_REFUND") {
+      if (order.refundDisputedAt) return { ok: true };
+      return saveTransferUpdate(tx, orderId, version, update.type, { refundDisputedAt: new Date() });
+    }
+    if (order.refundAmount && order.refundAmount.lessThan(order.totalAmount)) {
+      throw new HttpError("The seller reported less than the full order amount. You can dispute the amount or request help.", 409);
+    }
+    return saveTransferUpdate(tx, orderId, version, update.type, { transferResolvedAt: new Date() });
   });
 }
 
@@ -193,8 +289,15 @@ export async function submitReceipt(orderId: string, token: string, details: z.i
     const hash = hashToken(token);
     const order = await tx.order.findUnique({ where: { id: orderId, buyerAccessHash: hash, seller: activeShop }, include: { items: true } });
     if (!order) throw new HttpError("This checkout could not be found.", 404);
+    if (order.paymentStatus === "PENDING_VERIFICATION" || order.paymentStatus === "VERIFIED_PAID") {
+      return { orderId, code: order.garmentCode, status: order.paymentStatus, stored: false };
+    }
     const garmentId = order.items[0]?.garmentId;
     if (!garmentId) throw new HttpError("Your lock has expired.", 409);
+    if (!order.buyerPhone || order.buyerPhone !== details.buyerPhone || order.buyerName !== details.buyerName ||
+        order.shippingAddress !== details.shippingAddress || order.fulfillmentType !== details.fulfillmentType) {
+      throw new HttpError("Checkout details changed. Review the prepared amount and delivery before submitting your receipt.", 409);
+    }
     const changed = await tx.garment.updateMany({
       where: { id: garmentId, seller: activeShop, status: "LOCKED", lockSessionToken: hash, lockedUntil: { gt: new Date() } },
       data: { status: "PENDING_VERIFICATION", lockSessionToken: null, lockedUntil: null },
@@ -207,8 +310,7 @@ export async function submitReceipt(orderId: string, token: string, details: z.i
       throw new HttpError("Your lock has expired or been released.", 409);
     }
     await tx.order.update({ where: { id: orderId }, data: {
-      ...details, receiptImageUrl, receiptSubmittedAt: new Date(), paymentStatus: "PENDING_VERIFICATION",
-      totalAmount: details.fulfillmentType === "HOLD_BOX" ? order.itemAmount : order.itemAmount.plus(order.shippingFee),
+      receiptImageUrl, receiptSubmittedAt: new Date(), paymentStatus: "PENDING_VERIFICATION",
     } });
     return { orderId, code: order.garmentCode, status: "PENDING_VERIFICATION" as const, stored: true };
   });

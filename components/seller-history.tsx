@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ImagePlus, ReceiptText } from "lucide-react";
-import { money, receiptRejectionLabels, whatsapp } from "@/lib/catalog";
+import { money, receiptRejectionLabels, transferResolutionLabel, whatsapp } from "@/lib/catalog";
 import type { SellerHistory } from "@/lib/seller";
 import { action, message } from "./client";
 import { GarmentPhoto, Notice } from "./common";
@@ -54,7 +54,10 @@ export function SellerHistory({ onReceipt }: { onReceipt: (id: string) => void }
         { label: "Receipt submitted", time: order.receiptSubmittedAt },
         { label: order.status === "REJECTED" ? "Receipt rejected" : "Payment confirmed", time: order.reviewedAt },
         { label: "Dispatch requested", time: order.dispatchRequestedAt },
-        { label: order.shipmentUnconfirmed ? "Shipment recorded" : "Shipped", time: order.shippedAt },
+        { label: "Shipped", time: order.shippedAt },
+        { label: "Prior shipment confirmed · Shipment date unknown", time: order.shipmentReconciledAt },
+        { label: "Bank transfer reported", time: order.transferReportedAt },
+        { label: "Buyer confirmed receipt of the full refund", time: order.transferResolvedAt },
       ].filter(event => event.time);
       return <article className="surface receipt-order stack" key={order.id}>
         <div className="order-body">
@@ -66,6 +69,8 @@ export function SellerHistory({ onReceipt }: { onReceipt: (id: string) => void }
           <div className="order-total"><span className="badge">{statuses[order.status]}</span></div>
         </div>
         {order.status === "REJECTED" && <p>Reason · {reason ?? "Not recorded"}</p>}
+        {order.transferResolution && <p>{transferResolutionLabel(order.transferResolution)}{order.refundAmount && <> · {money(order.refundAmount)} · {order.refundSentOn} · Reference {order.refundReference}</>}</p>}
+        {order.refundDisputed && !order.transferResolvedAt && <p>The buyer says they haven’t received the full refund.</p>}
         {order.status === "VERIFIED_PAID" && <dl className="history-amounts">
           <div><dt>Payment received</dt><dd>{money(order.total)}</dd></div>
           <div><dt>Shipping charged</dt><dd>{money(order.shippingCharged)}</dd></div>
@@ -73,7 +78,7 @@ export function SellerHistory({ onReceipt }: { onReceipt: (id: string) => void }
         </dl>}
         {order.status !== "AWAITING_RECEIPT" && order.status !== "EXPIRED" && <p className="muted">
           {order.fulfillmentType === "HOLD_BOX" ? "Hold Box" : "Ship Now"}
-          {order.status === "VERIFIED_PAID" && !order.shippedAt ? order.shipmentUnconfirmed ? " · Shipment status unknown" : " · Not yet shipped" : ""}
+          {order.status === "VERIFIED_PAID" && !order.shippedAt && !order.shipmentReconciledAt ? order.shipmentUnconfirmed ? " · Shipment status unknown" : " · Not yet shipped" : ""}
         </p>}
         <ul className="history-events">{events.map(event => <li key={event.label}>{event.label} · <time dateTime={event.time!}>{dates.format(new Date(event.time!))}</time></li>)}</ul>
         {order.hasReceipt && <details className="receipt-details"><summary><ImagePlus size={17} strokeWidth={1.5} /> Receipt screenshot <ChevronDown size={17} strokeWidth={1.5} /></summary>

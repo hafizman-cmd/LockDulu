@@ -31,12 +31,20 @@ export function message(error: unknown) {
   return error instanceof Error ? error.message : "Please try again.";
 }
 
-export function readLocal<T>(key: string, fallback: T): T {
-  try { return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback; } catch { return fallback; }
+export function randomToken() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export function writeLocal(key: string, value: unknown) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* In-app browsers may block storage. */ }
+export function readLocal<T>(key: string, fallback: T, storage: "localStorage" | "sessionStorage" = "localStorage"): T {
+  try { return JSON.parse(window[storage].getItem(key) ?? "null") ?? fallback; } catch { return fallback; }
+}
+
+export function writeLocal(key: string, value: unknown, storage: "localStorage" | "sessionStorage" = "localStorage") {
+  try { window[storage].setItem(key, JSON.stringify(value)); } catch { /* In-app browsers may block storage. */ }
+}
+
+export function removeLocal(key: string, storage: "localStorage" | "sessionStorage" = "localStorage") {
+  try { window[storage].removeItem(key); } catch { /* The browser may block storage. */ }
 }
 
 export type SavedLock = { itemId: string; token: string; orderId?: string; lockedUntil?: string; storeSlug: string; submitted?: boolean };
@@ -72,6 +80,7 @@ export function useClock(serverTime: number) {
 
 export function usePolling<T extends { serverTime: number }>(initial: T, get: (signal?: AbortSignal) => Promise<T>, interval = 4000) {
   const [data, setData] = useState(initial);
+  const [stale, setStale] = useState(false);
   useEffect(() => { setData(initial); }, [initial]);
   useEffect(() => {
     const aborter = new AbortController();
@@ -81,17 +90,28 @@ export function usePolling<T extends { serverTime: number }>(initial: T, get: (s
       busy = true;
       try {
         const next = await get(aborter.signal);
-        if (!aborter.signal.aborted) setData(current => next.serverTime >= current.serverTime ? next : current);
-      } catch { /* A transient polling failure should leave the last view usable. */ }
+        if (!aborter.signal.aborted) {
+          setData(current => next.serverTime >= current.serverTime ? next : current);
+          setStale(false);
+        }
+      } catch {
+        if (!aborter.signal.aborted) setStale(true);
+      }
       finally { busy = false; }
     };
     const intervalId = window.setInterval(run, interval);
+    const markOffline = () => setStale(true);
+    if (!navigator.onLine) markOffline();
     document.addEventListener("visibilitychange", run);
+    window.addEventListener("online", run);
+    window.addEventListener("offline", markOffline);
     return () => {
       aborter.abort();
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", run);
+      window.removeEventListener("online", run);
+      window.removeEventListener("offline", markOffline);
     };
   }, [get, interval]);
-  return [data, setData] as const;
+  return [data, setData, stale] as const;
 }

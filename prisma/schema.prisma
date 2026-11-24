@@ -95,6 +95,7 @@ model Garment {
   seller           Seller          @relation(fields: [sellerId], references: [id])
   dropId           String?
   drop             Drop?           @relation(fields: [dropId], references: [id])
+  publishRequestId String?
   code             String
   title            String
   brand            String
@@ -114,6 +115,7 @@ model Garment {
   orderItem        OrderItem?
 
   @@unique([sellerId, code])
+  @@unique([sellerId, publishRequestId])
   @@index([sellerId, status, lockedUntil])
   @@index([dropId])
 }
@@ -147,11 +149,36 @@ model Order {
   dispatchGroupId     String?
   shippedAt           DateTime?
   shipmentUnconfirmed Boolean         @default(false)
+  shipmentReconciledAt DateTime?
+  transferReference   String?
+  transferReportedAt  DateTime?
+  transferResolvedAt  DateTime?
+  transferResolution  String?
+  transferVersion     Int             @default(0)
+  transferEscalatedAt DateTime?
+  refundAmount        Decimal?
+  refundSentOn        String?
+  refundReference     String?
+  refundNote          String?
+  refundDisputedAt    DateTime?
+  transferEvents      TransferEvent[]
   items               OrderItem[]
 
   @@index([sellerId, paymentStatus])
   @@index([buyerPhone, paymentStatus])
   @@index([sellerId, dispatchGroupId])
+  @@index([transferEscalatedAt, transferResolvedAt])
+}
+
+model TransferEvent {
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id])
+  version   Int
+  kind      String
+  createdAt DateTime @default(now())
+  detail    String?
+
+  @@id([orderId, version])
 }
 
 model OrderItem {

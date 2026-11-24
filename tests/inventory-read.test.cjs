@@ -12,6 +12,7 @@ function inventoryWith(database) {
   const dependencies = {
     "./db.ts": { db: () => database, writeTransaction: run => run(database) },
     "./http.ts": { HttpError: class HttpError extends Error {} },
+    "./payment.ts": { paymentConfigured: () => false },
     "./security.ts": { hashToken: value => value },
     "./shop-status.ts": { activeShop: { status: "ACTIVE" } },
   };

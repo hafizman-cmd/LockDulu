@@ -7,13 +7,14 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { adminOverview, moderateShop } from "../lib/admin.ts";
 import { db } from "../lib/db.ts";
-import { lockItem, orderState, readItem, readStore, reviewOrder, submitReceipt } from "../lib/inventory.ts";
+import { lockItem, orderState, preparePayment, readItem, readStore, reviewOrder, submitReceipt } from "../lib/inventory.ts";
 import { buyerStatus } from "../lib/catalog.ts";
 import { createDrop, dashboardData, deleteGarment, listGarment, lockerLookup, markShipped, requestDispatch, sellerHistory, updateSettings, updateShopProfile } from "../lib/seller.ts";
 import { readShopDirectory } from "../lib/shop-directory.ts";
 import { requireActiveSeller } from "../lib/shop-status.ts";
 
 test("shop moderation blocks active checkouts and hides held and deleted shops", async () => {
+  process.env.LOCKDULU_TEST_PAYMENTS = "1";
   const directory = await mkdtemp(join(tmpdir(), "lockdulu-shop-moderation-"));
   process.env.TURSO_DATABASE_URL = pathToFileURL(join(directory, "test.db")).href;
   process.env.TURSO_AUTH_TOKEN = "";
@@ -72,6 +73,7 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
     assert.equal(await readStore(otherShop.storeSlug), null);
 
     const delivery = { buyerName: "Test buyer", buyerPhone: phone, shippingAddress: "A test address", fulfillmentType: "HOLD_BOX" } as const;
+    await preparePayment(quote.orderId, token, delivery);
     await submitReceipt(quote.orderId, token, delivery, "test-receipt.bin");
     overview = await adminOverview(1);
     assert.equal(overview.activeShops, 1);
@@ -92,7 +94,7 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
     await assert.rejects(requestDispatch([token]), { status: 409 });
     assert.equal((await lockerLookup(quote.orderId, [token]))[0]?.shopStatus, "HELD");
     assert.equal((await adminOverview(1)).shopRows.find(row => row.id === shop.id)?.unresolvedOrders, 1);
-    await assert.rejects(moderateShop(shop.id, "delete"), /pending receipts and unshipped orders/);
+    await assert.rejects(moderateShop(shop.id, "delete"), /pending receipts, unshipped orders, and open transfer reports/);
     const dashboard = await dashboardData(shop.id);
     assert.equal(dashboard?.seller.status, "HELD");
     assert.equal(dashboard?.orders.length, 1);
@@ -126,6 +128,7 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
 
     const secondToken = "e".repeat(64);
     const confirmed = await lockItem(garment.id, secondToken);
+    await preparePayment(confirmed.quote.orderId, secondToken, delivery);
     await submitReceipt(confirmed.quote.orderId, secondToken, delivery, "test-receipt.bin");
     await reviewOrder(shop.id, confirmed.quote.orderId, true);
     await assert.rejects(reviewOrder(shop.id, confirmed.quote.orderId, true), { status: 409 });
@@ -148,7 +151,7 @@ test("shop moderation blocks active checkouts and hides held and deleted shops",
       await db().garment.update({ where: { id: available.id }, data: { lockedUntil: new Date(Date.now() - 5_000) } });
     }
 
-    await assert.rejects(moderateShop(shop.id, "delete"), /pending receipts and unshipped orders/);
+    await assert.rejects(moderateShop(shop.id, "delete"), /pending receipts, unshipped orders, and open transfer reports/);
     await requestDispatch([secondToken]);
     await markShipped(shop.id, [confirmed.quote.orderId]);
     await moderateShop(shop.id, "delete");

@@ -7,20 +7,20 @@ import {
 } from "lucide-react";
 import { buyerStatus, grades, money, rejectionMessage, timer, whatsapp, type GarmentView, type Quote } from "@/lib/catalog";
 import type { readItem } from "@/lib/inventory";
-import { action, forgetLock, json, message, readLocal, RequestError, savedLocks, saveLock, upload, useClock, usePolling, writeLocal, type SavedLock } from "./client";
-import { Footer, GarmentPhoto, Header, Notice, OrderReference, Sheet, Stage } from "./common";
+import { action, forgetLock, json, message, randomToken, readLocal, removeLocal, RequestError, savedLocks, saveLock, upload, useClock, usePolling, writeLocal, type SavedLock } from "./client";
+import { AvailabilityNotice, Footer, GarmentPhoto, Header, Notice, OrderReference, Sheet, Stage } from "./common";
 
 type ItemData = NonNullable<Awaited<ReturnType<typeof readItem>>>;
 type Delivery = { buyerName: string; buyerPhone: string; shippingAddress: string; fulfillmentType: "SHIP_NOW" | "HOLD_BOX" };
 type LockResponse = { quote: Quote; serverTime: number };
 type OrderStatus = "AWAITING_RECEIPT" | "PENDING_VERIFICATION" | "VERIFIED_PAID" | "REJECTED" | "EXPIRED";
 type OrderState = {
-  status: OrderStatus; quote: Quote | null; code: string; serverTime: number; rejectionReason: string | null; delivery: Delivery | null;
+  status: OrderStatus; quote: Quote | null; code: string; serverTime: number; rejectionReason: string | null; delivery: Delivery | null; paymentTotal: string | null;
 };
 type Completed = { orderId: string; code: string; status: Exclude<OrderStatus, "AWAITING_RECEIPT">; rejectionReason?: string | null };
 const defaultDelivery: Delivery = { buyerName: "", buyerPhone: "", shippingAddress: "", fulfillmentType: "SHIP_NOW" };
 const photoNames = ["Front", "Back", "Tag"];
-const deliveryKey = "lockdulu.delivery";
+const deliveryKey = "lockdulu.rememberedDelivery";
 
 function Gallery({ item }: { item: GarmentView }) {
   const [index, setIndex] = useState(0);
@@ -80,7 +80,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
       throw error;
     }
   }, [id, router]);
-  const [data, setData] = usePolling(initial, get);
+  const [data, setData, stale] = usePolling(initial, get);
   const [lockTime, setLockTime] = useState(0);
   const now = useClock(Math.max(lockTime, data.serverTime));
   const [active, setActive] = useState<SavedLock | null>(null);
@@ -89,6 +89,8 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
   const [step, setStep] = useState<1 | 2>(1);
   const [done, setDone] = useState<Completed | null>(null);
   const [delivery, setDelivery] = useState(defaultDelivery);
+  const [rememberDelivery, setRememberDelivery] = useState(false);
+  const [preparedTotal, setPreparedTotal] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -113,7 +115,9 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
   }, []);
 
   useEffect(() => {
-    setDelivery(readLocal(deliveryKey, defaultDelivery));
+    removeLocal("lockdulu.delivery");
+    const savedDelivery = readLocal<Delivery | null>(deliveryKey, null);
+    if (savedDelivery) { setDelivery(savedDelivery); setRememberDelivery(true); }
     const locks = savedLocks().filter(lock => lock.itemId === id);
     const stored = locks.find(lock => !lock.submitted && (!lock.lockedUntil || Date.parse(lock.lockedUntil) > initial.serverTime)) ??
       locks.find(lock => lock.submitted || lock.orderId);
@@ -130,7 +134,8 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
         setQuote(result.quote);
         if (result.delivery) {
           setDelivery(result.delivery);
-          setStep(2);
+          setPreparedTotal(result.paymentTotal);
+          setStep(result.paymentTotal ? 2 : 1);
         }
         setOpen(true);
       }
@@ -148,7 +153,8 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
   const quoteUntil = quote ? Date.parse(quote.lockedUntil) : 0;
   const remaining = Math.max(0, quoteUntil - now);
   const expired = !!quote && !remaining && !done;
-  const isAvailable = item.status === "AVAILABLE" && item.locksOpen;
+  const paymentUnavailable = item.status === "AVAILABLE" && item.locksOpen && !data.store.paymentReady;
+  const isAvailable = item.status === "AVAILABLE" && item.locksOpen && data.store.paymentReady;
   const canViewOrder = !!done && done.status !== "EXPIRED" && done.status !== "REJECTED";
   const running = !!quote && !expired && !done;
   const canRetry = active && !active.submitted && !quote && !done && (item.status === "LOCKED" || item.status === "PENDING_VERIFICATION" ||
@@ -196,7 +202,8 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
         if (result.quote) {
           setQuote(result.quote);
           if (result.delivery) setDelivery(result.delivery);
-          setStep(result.delivery ? 2 : 1);
+          setPreparedTotal(result.paymentTotal);
+          setStep(result.paymentTotal ? 2 : 1);
         } else if (result.status !== "AWAITING_RECEIPT") {
           rememberOrder(active, { orderId: active.orderId, code: result.code, status: result.status, rejectionReason: result.rejectionReason });
         }
@@ -207,7 +214,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
     }
     const retry = active && !active.submitted && !active.lockedUntil;
     const saved: SavedLock = retry ? active : {
-      itemId: id, token: Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, "0")).join(""),
+      itemId: id, token: randomToken(),
       storeSlug: data.store.storeSlug,
     };
     setBusy(true);
@@ -218,7 +225,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
       const reserved = { ...saved, orderId: result.quote.orderId, lockedUntil: result.quote.lockedUntil };
       saveLock(reserved);
       setActive(reserved); setQuote(result.quote); setLockTime(result.serverTime);
-      setStep(1); setDone(null); setFile(null); setReceiptUnconfirmed(false); setOpen(true);
+      setStep(1); setPreparedTotal(null); setDone(null); setFile(null); setReceiptUnconfirmed(false); setOpen(true);
       setExpandedQr(false); setQrFailed(false); setQrRetry(0);
     } catch (exception) {
       if (exception instanceof RequestError && exception.status === 409) {
@@ -237,8 +244,9 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
     if (delivery.buyerName.trim().length < 2) { setError("Enter the buyer's name."); return; }
     setBusy(true); setError("");
     try {
-      await action("preparePayment", { id: quote.orderId, token: active.token, delivery });
-      writeLocal(deliveryKey, delivery);
+      const { total } = await action<{ total: string }>("preparePayment", { id: quote.orderId, token: active.token, delivery });
+      if (rememberDelivery) writeLocal(deliveryKey, delivery);
+      setPreparedTotal(total);
       setCopied(false); setStep(2);
     } catch (exception) {
       setError(message(exception));
@@ -273,7 +281,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
 
   async function sendReceipt(event: React.FormEvent) {
     event.preventDefault();
-    if (!quote || !active || !file || expired || receiptUnconfirmed || busy) return;
+    if (!quote || !active || !file || !preparedTotal || expired || receiptUnconfirmed || busy) return;
     const form = new FormData();
     form.set("file", file); form.set("orderId", quote.orderId); form.set("token", active.token);
     form.set("delivery", JSON.stringify(delivery));
@@ -285,7 +293,9 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
     } catch (exception) {
       try {
         if (!await checkReceipt(active, quote.orderId)) {
-          setError(`${message(exception)} If you already paid, retry the receipt upload for this order.`);
+          setError(exception instanceof RequestError && exception.status === 409
+            ? `${message(exception)} If you already paid, contact the seller with your order number before paying again.`
+            : `${message(exception)} If you already paid, retry the receipt upload for this order.`);
         }
       } catch {
         setReceiptUnconfirmed(true);
@@ -318,6 +328,8 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
           <div className="condition surface"><h2>{grades[item.conditionGrade]}</h2><p>{item.conditionNotes || "No additional condition notes."}</p></div>
           <Schematic item={item} />
           <p className="detail-hint"><ShieldCheck size={18} strokeWidth={1.5} /> One piece available per listing. Receipt verification is handled by the seller.</p>
+          {stale && <AvailabilityNotice serverTime={data.serverTime} />}
+          {paymentUnavailable && <Notice>This shop hasn’t set up payments yet. Check back later or ask the seller.</Notice>}
           {reference && needsHelp && <button type="button" className="button" onClick={() => setOpen(true)}>Get help with your previous order</button>}
         </div>
       </div>
@@ -327,7 +339,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
       <div className="wrap cta-inner">
         <div className="cta-info"><b>{money(item.price)}</b><span>{lockedByAnother ? `Locked by another buyer · releases in ${timer(itemUntil - now)}` : running ? "10-minute reservation" : item.status === "AVAILABLE" ? (item.locksOpen ? "10-minute reservation" : "Locks open when the drop goes live") : buyerStatus(item.status)}</span></div>
         <button className="button primary" onClick={startLock} disabled={busy || restoring || (!isAvailable && !running && !canViewOrder && !canRetry)}>
-          <LockKeyhole size={18} strokeWidth={1.5} />{busy || restoring ? "Working…" : canViewOrder ? "View order" : running ? "Resume checkout" : canRetry ? "Recover checkout" : isAvailable ? "Lock Item (10:00)" : lockedByAnother ? "Currently locked" : item.status === "AVAILABLE" ? "Preview only" : buyerStatus(item.status)}
+          <LockKeyhole size={18} strokeWidth={1.5} />{busy || restoring ? "Working…" : canViewOrder ? "View order" : running ? "Resume checkout" : canRetry ? "Recover checkout" : isAvailable ? "Lock Item (10:00)" : paymentUnavailable ? "Payment unavailable" : lockedByAnother ? "Currently locked" : item.status === "AVAILABLE" ? "Preview only" : buyerStatus(item.status)}
         </button>
         {!open && error && <Notice>{error}</Notice>}
       </div>
@@ -337,17 +349,17 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
         <Notice>Your ten-minute reservation ended. The garment may now be available to another buyer.</Notice>
         {reference && <OrderReference key={reference} number={reference} showHint />}
         <p>If you already transferred the money, keep your bank reference and contact the seller before making another payment.</p>
-        <a className="button primary" href={sellerLink} target="_blank" rel="noreferrer"><MessageCircle size={18} strokeWidth={1.5} /> Already transferred? Message seller</a>
+        {data.store.whatsappNumber && <a className="button" href={sellerLink} target="_blank" rel="noreferrer"><MessageCircle size={18} strokeWidth={1.5} /> Message seller</a>}
         {done?.status !== "EXPIRED" && <button className="button" disabled={busy} onClick={retryReceiptCheck}>Check receipt status</button>}
         {error && <Notice>{error}</Notice>}
-        <Link href={trackerHref} className="button">Open My orders</Link>
+        <Link href={trackerHref} className="button primary">Already transferred? Open My orders</Link>
         <button className="text-button" disabled={busy} onClick={() => { setOpen(false); setError(""); }}>Return to garment</button>
       </div> : done ? <div className="stack">
         {done.status === "REJECTED" ? <Notice>{rejectionMessage(done.rejectionReason)}</Notice> :
           <div className="receipt-success" role="status"><ShieldCheck size={31} strokeWidth={1.5} /><p>{done.status === "VERIFIED_PAID" ? "The seller confirmed your payment." : "The seller will review your transfer. Your piece is reserved while payment is checked."}</p></div>}
         <OrderReference key={done.orderId} number={done.orderId} showHint />
-        <a className="button primary" href={sellerLink} target="_blank" rel="noreferrer"><MessageCircle size={18} strokeWidth={1.5} /> Message Seller on WhatsApp</a>
-        <Link className="button" href={trackerHref}>Open My orders</Link>
+        {data.store.whatsappNumber && <a className="button" href={sellerLink} target="_blank" rel="noreferrer"><MessageCircle size={18} strokeWidth={1.5} /> Message seller on WhatsApp</a>}
+        <Link className={"button" + (done.status === "REJECTED" ? " primary" : "")} href={trackerHref}>Open My orders</Link>
       </div> : quote && <>
         <div className="checkout-status"><span>Step {step} of 2 · {step === 1 ? "Delivery" : "DuitNow payment"}</span><strong className="timer"><Clock3 size={17} strokeWidth={1.5} />{timer(remaining)}</strong></div>
         <OrderReference key={quote.orderId} number={quote.orderId} showHint />
@@ -356,6 +368,10 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
           <label>Buyer name<input required autoComplete="name" maxLength={100} value={delivery.buyerName} onChange={event => setDelivery({ ...delivery, buyerName: event.target.value })} /></label>
           <label>WhatsApp phone<input required type="tel" autoComplete="tel" maxLength={30} placeholder="012 345 6789" value={delivery.buyerPhone} onChange={event => setDelivery({ ...delivery, buyerPhone: event.target.value })} /></label>
           <label>Delivery address<input ref={addressRef} required autoComplete="street-address" maxLength={500} value={delivery.shippingAddress} onChange={event => setDelivery({ ...delivery, shippingAddress: event.target.value })} /></label>
+          <label><input type="checkbox" checked={rememberDelivery} onChange={event => {
+            setRememberDelivery(event.target.checked);
+            if (!event.target.checked) removeLocal(deliveryKey);
+          }} /> Remember my delivery details in this browser</label>
           <fieldset className="delivery-options"><legend>Fulfillment</legend>
             <label className="surface"><input type="radio" name="fulfillment" checked={delivery.fulfillmentType === "SHIP_NOW"} onChange={() => setDelivery({ ...delivery, fulfillmentType: "SHIP_NOW" })} /><Truck size={21} strokeWidth={1.5} /><span><b>Ship Now</b><small>+{money(quote.shippingFee)} shipping</small></span></label>
             <label className="surface"><input type="radio" name="fulfillment" checked={delivery.fulfillmentType === "HOLD_BOX"} onChange={() => setDelivery({ ...delivery, fulfillmentType: "HOLD_BOX" })} /><Package size={21} strokeWidth={1.5} /><span><b>Save in Hold Box</b><small>Request dispatch within {quote.holdBoxDays} days of payment approval. Arrange combined shipping with the seller.</small></span></label>
@@ -368,21 +384,21 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
           <div className={`qr-card surface${expandedQr ? " qr-expanded" : ""}`}>
             {qrFailed ? <button type="button" className="button" onClick={() => { setQrFailed(false); setQrRetry(current => current + 1); }}>Retry QR image</button> :
               <img id="seller-payment-qr" src={qrRetry ? `${quote.qrCodeUrl}?retry=${qrRetry}` : quote.qrCodeUrl} alt="Seller DuitNow QR" onError={() => setQrFailed(true)} />}
-            <div><strong>{quote.qrAccountName}</strong><p>{quote.qrBankLabel}</p><b>{money(exact!)}</b></div>
+            <div><strong>{quote.qrAccountName}</strong><p>{quote.qrBankLabel}</p><b>{money(preparedTotal!)}</b></div>
           </div>
           {qrFailed && <Notice>The QR image could not load. Retry it before transferring.</Notice>}
           {quote.qrCodeUrl === "/sample/duitnow.svg" && <p className="muted">Sample QR for checkout testing. Replace it with your seller’s DuitNow QR before accepting live payments.</p>}
           <div className="button-row">{!qrFailed && <><a href={quote.qrCodeUrl} download className="button"><Download size={17} strokeWidth={1.5} /> Download QR</a>
             <button type="button" className="button" aria-expanded={expandedQr} aria-controls="seller-payment-qr" onClick={() => setExpandedQr(current => !current)}>{expandedQr ? "Smaller QR" : "Enlarge QR"}</button></>}
             <button type="button" className="button" onClick={async () => {
-              try { await navigator.clipboard.writeText(exact!); setCopied(true); setError(""); }
-              catch { setError(`Copy the amount manually: ${exact}`); }
+              try { await navigator.clipboard.writeText(preparedTotal!); setCopied(true); setError(""); }
+              catch { setError(`Copy the amount manually: ${preparedTotal}`); }
             }}><Copy size={17} strokeWidth={1.5} /> {copied ? "Amount copied" : "Copy Amount"}</button></div>
           <label className="file-field"><ImagePlus size={22} strokeWidth={1.5} /><span>{file?.name ?? "Payment Receipt Screenshot"}<small>JPG, PNG, WebP, HEIF, or AVIF, up to 4 MB</small></span><input required type="file" accept="image/jpeg,image/png,image/webp,image/heif,image/heic,image/avif" aria-label="Payment receipt screenshot" disabled={busy || receiptUnconfirmed} onChange={event => setFile(event.target.files?.[0] ?? null)} /></label>
           {error && <Notice>{error}</Notice>}
           {receiptUnconfirmed ? <button className="button primary" type="button" disabled={busy} onClick={retryReceiptCheck}>{busy ? "Checking receipt…" : "Check receipt status"}</button> :
             <button className="button primary" disabled={busy || !file || expired}>{busy ? "Submitting receipt…" : "Submit payment receipt"}</button>}
-          <button className="text-button" type="button" disabled={busy || receiptUnconfirmed} onClick={() => { setStep(1); setError(""); }}>Back to delivery</button>
+          <button className="text-button" type="button" disabled={busy || receiptUnconfirmed} onClick={() => { setStep(1); setError(""); }}>Edit delivery before paying</button>
         </form>}
       </>}
     </Sheet>}

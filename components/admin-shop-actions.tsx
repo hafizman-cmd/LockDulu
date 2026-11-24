@@ -8,7 +8,7 @@ import { Notice, Sheet } from "./common";
 const actions = {
   hold: { label: "Hold shop", details: "The storefront will be hidden and new checkouts will stop. Buyers can track existing orders, and the seller can still review receipts and fulfill them." },
   resume: { label: "Resume shop", details: "The shop will be visible to buyers again, and the seller will regain access to their shop tools." },
-  delete: { label: "Delete shop", details: "This permanently removes the storefront and disables seller sign-in. Resolve all pending receipts and unshipped orders before deleting." },
+  delete: { label: "Delete shop", details: "This permanently removes the storefront and disables seller sign-in. Resolve pending receipts, unshipped orders, and open transfer reports before deleting." },
 };
 
 export function AdminShopActions({ shopId, shopName, held, unresolvedOrders }: {

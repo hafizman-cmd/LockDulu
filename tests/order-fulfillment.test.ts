@@ -6,10 +6,10 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { createClient } from "@libsql/client";
-import { moderateShop } from "../lib/admin.ts";
+import { adminTransferCases, moderateShop } from "../lib/admin.ts";
 import { db } from "../lib/db.ts";
-import { lockItem, orderState, preparePayment, readItem, readStore, reviewOrder, submitReceipt } from "../lib/inventory.ts";
-import { dashboardData, deleteGarment, lockerLookup, markShipped, queueShipment, requestDispatch, sellerHistory, setGarmentHidden, updateShopProfile } from "../lib/seller.ts";
+import { lockItem, orderState, preparePayment, readItem, readStore, reportTransfer, reviewOrder, submitReceipt, updateBuyerTransfer, updateSellerTransfer } from "../lib/inventory.ts";
+import { dashboardData, deleteGarment, editGarment, listGarment, lockerLookup, markShipped, queueShipment, reconcileShipment, requestDispatch, sellerHistory, setGarmentHidden, updateShopProfile } from "../lib/seller.ts";
 import { whatsapp } from "../lib/catalog.ts";
 
 const buyerPhone = "60123456789";
@@ -17,6 +17,7 @@ const address = "12 Jalan Merdeka, Kuala Lumpur";
 const delivery = { buyerName: "Test Buyer", buyerPhone, shippingAddress: address, fulfillmentType: "SHIP_NOW" } as const;
 
 test("paid orders stay actionable and Hold Box parcels contain only the selected pieces", async () => {
+  process.env.LOCKDULU_TEST_PAYMENTS = "1";
   const directory = await mkdtemp(join(tmpdir(), "lockdulu-fulfillment-"));
   process.env.TURSO_DATABASE_URL = pathToFileURL(join(directory, "test.db")).href;
   process.env.TURSO_AUTH_TOKEN = "";
@@ -40,10 +41,16 @@ test("paid orders stay actionable and Hold Box parcels contain only the selected
     assert.equal((await lockerLookup(ship.id, [ship.token]))[0]?.status, "AWAITING_RECEIPT");
     await assert.rejects(setGarmentHidden(shop.id, ship.garment.id, true), { status: 409 });
     await assert.rejects(preparePayment(ship.id, "0".repeat(64), delivery), { status: 409 });
+    assert.equal((await preparePayment(ship.id, ship.token, delivery)).total, "38.00");
+    const holdDelivery = { ...delivery, fulfillmentType: "HOLD_BOX" } as const;
+    assert.equal((await preparePayment(ship.id, ship.token, holdDelivery)).total, "30.00");
+    await assert.rejects(submitReceipt(ship.id, ship.token, delivery, "test.bin"), { status: 409 });
+    assert.equal((await orderState(ship.id, ship.token)).paymentTotal, "30.00");
     await preparePayment(ship.id, ship.token, delivery);
     assert.deepEqual((await orderState(ship.id, ship.token)).delivery, delivery);
     assert.equal((await lockerLookup(ship.id, [ship.token]))[0]?.status, "AWAITING_RECEIPT");
     await submitReceipt(ship.id, ship.token, delivery, "test.bin");
+    assert.equal((await submitReceipt(ship.id, ship.token, delivery, "duplicate.bin")).stored, false);
     await assert.rejects(deleteGarment(shop.id, ship.garment.id), { status: 409 });
     await assert.rejects(setGarmentHidden(other.id, ship.garment.id, true), { status: 404 });
     await setGarmentHidden(shop.id, ship.garment.id, true);
@@ -104,11 +111,48 @@ test("paid orders stay actionable and Hold Box parcels contain only the selected
     const secondLock = await lockItem(expired.garment.id, "3".repeat(64));
     await assert.rejects(submitReceipt(expired.id, expired.token, delivery, "test.bin"), { status: 409 });
     assert.ok((await orderState(secondLock.quote.orderId, "3".repeat(64))).quote);
+    await assert.rejects(reportTransfer(expired.id, "3".repeat(64), "BANK-111"), { status: 404 });
+    await reportTransfer(expired.id, expired.token, "BANK-111");
+    await reportTransfer(expired.id, expired.token, "BANK-222");
+    assert.equal((await dashboardData(shop.id))?.transferReports[0]?.reference, "BANK-111");
+    await assert.rejects(updateSellerTransfer(other.id, expired.id, 0, { type: "TRANSFER_NOT_FOUND" }), { status: 409 });
+    assert.equal((await orderState(secondLock.quote.orderId, "3".repeat(64))).status, "AWAITING_RECEIPT");
     await db().garment.update({ where: { id: expired.garment.id }, data: { lockedUntil: new Date(0) } });
+    await moderateShop(shop.id, "hold");
+    await assert.rejects(moderateShop(shop.id, "delete"), { status: 409 });
+    await updateSellerTransfer(shop.id, expired.id, 0, { type: "TRANSFER_NOT_FOUND" });
+    await assert.rejects(updateBuyerTransfer(expired.id, ship.token, 1, { type: "CORRECT_REFERENCE", reference: "BANK-333" }), { status: 404 });
+    await updateBuyerTransfer(expired.id, expired.token, 1, { type: "CORRECT_REFERENCE", reference: "BANK-333" });
+    assert.equal((await dashboardData(shop.id))?.transferReports[0]?.reference, "BANK-333");
+    const sentOn = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Kuala_Lumpur", dateStyle: "short" }).format(new Date());
+    const refund = { type: "REFUNDED", amount: "20.00", sentOn, reference: "REFUND-111", note: "Refunded through bank transfer" } as const;
+    await assert.rejects(updateSellerTransfer(shop.id, expired.id, 2, { ...refund, amount: "99.00" }), { status: 400 });
+    await updateSellerTransfer(shop.id, expired.id, 2, refund);
+    const [reported] = await lockerLookup(expired.id, [expired.token]);
+    assert.equal(reported.transferResolution, "REFUNDED");
+    assert.equal(reported.transferResolvedAt, null);
+    assert.equal(reported.refundAmount, "20.00");
+    assert.equal(reported.refundReference, "REFUND-111");
+    await assert.rejects(updateBuyerTransfer(expired.id, expired.token, 3, { type: "CONFIRM_REFUND" }), { status: 409 });
+    await assert.rejects(updateSellerTransfer(shop.id, expired.id, 2, refund), { status: 409 });
+    await updateBuyerTransfer(expired.id, expired.token, 3, { type: "DISPUTE_REFUND" });
+    await updateBuyerTransfer(expired.id, expired.token, 4, { type: "REQUEST_HELP" });
+    assert.equal((await dashboardData(shop.id))?.transferReports[0]?.refundDisputed, true);
+    const [helpCase] = (await adminTransferCases(1)).orders;
+    assert.equal(helpCase.id, expired.id);
+    assert.deepEqual(helpCase.transferEvents.map(event => event.kind), ["REQUEST_HELP", "DISPUTE_REFUND", "REFUNDED", "CORRECT_REFERENCE", "TRANSFER_NOT_FOUND"]);
+    await assert.rejects(moderateShop(shop.id, "delete"), { status: 409 });
+    await updateSellerTransfer(shop.id, expired.id, 5, { ...refund, amount: "38.00", reference: "REFUND-222" });
+    await updateBuyerTransfer(expired.id, expired.token, 6, { type: "CONFIRM_REFUND" });
+    assert.ok((await lockerLookup(expired.id, [expired.token]))[0]?.transferResolvedAt);
+    assert.equal((await dashboardData(shop.id))?.transferReports.length, 0);
+    assert.equal((await adminTransferCases(1)).count, 0);
+    await moderateShop(shop.id, "resume");
 
     async function paidHoldBox(code: string, token: string, shippingAddress = address, sellerId = shop.id, phone = buyerPhone) {
       const order = await reserve(code, token, sellerId);
       const details = { ...delivery, shippingAddress, buyerPhone: phone, fulfillmentType: "HOLD_BOX" } as const;
+      await preparePayment(order.id, token, details);
       await submitReceipt(order.id, token, details, "test.bin");
       await reviewOrder(sellerId, order.id, true);
       return order;
@@ -146,6 +190,44 @@ test("paid orders stay actionable and Hold Box parcels contain only the selected
     assert.ok(holdHistory?.shippedAt);
     assert.ok((await lockerLookup(first.id, [first.token]))[0]?.shippedAt);
     assert.equal((await lockerLookup(differentAddress.id, [differentAddress.token]))[0]?.shippedAt, null);
+
+    const legacy = await reserve("B-019", "9".repeat(64));
+    await preparePayment(legacy.id, legacy.token, delivery);
+    await submitReceipt(legacy.id, legacy.token, delivery, "test.bin");
+    await reviewOrder(shop.id, legacy.id, true);
+    await db().order.update({ where: { id: legacy.id }, data: { shipmentUnconfirmed: true } });
+    await assert.rejects(markShipped(shop.id, [legacy.id]), { status: 409 });
+    await reconcileShipment(shop.id, legacy.id);
+    await reconcileShipment(shop.id, legacy.id);
+    const [legacyOrder] = await lockerLookup(legacy.id, [legacy.token]);
+    assert.equal(legacyOrder.shippedAt, null);
+    assert.ok(legacyOrder.shipmentReconciledAt);
+    assert.equal((await dashboardData(shop.id))?.orders.some(order => order.id === legacy.id), false);
+
+    const listing = {
+      title: "Retry item", brand: "Test", category: "Tee", price: "30", pitInches: 22, lengthInches: 28,
+      conditionGrade: "LIKE_NEW", conditionNotes: "", images: ["/api/media/aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.webp"], flawPins: [],
+    } as const;
+    const values = { ...listing, images: [...listing.images], flawPins: [] };
+    await db().seller.updateMany({ where: { id: { in: [shop.id, other.id] } }, data: { nextItemNumber: 30 } });
+    const publishRequestId = "bbbbbbbb-bbbb-4bbb-abbb-bbbbbbbbbbbb";
+    const firstPublish = await listGarment(shop.id, values, null, publishRequestId);
+    assert.deepEqual(await listGarment(shop.id, values, null, publishRequestId), firstPublish);
+    assert.notEqual((await listGarment(other.id, values, null, publishRequestId)).id, firstPublish.id);
+    await editGarment(shop.id, firstPublish.id, { ...values, title: "Corrected", price: "40" }, null);
+    assert.equal((await readItem(firstPublish.id))?.item.title, "Corrected");
+
+    delete process.env.LOCKDULU_TEST_PAYMENTS;
+    assert.equal((await readItem(firstPublish.id))?.store.paymentReady, false);
+    await assert.rejects(lockItem(firstPublish.id, "a".repeat(64)), { status: 409 });
+    const qrCodeUrl = "/api/media/cccccccc-cccc-4ccc-accc-cccccccccccc.webp";
+    await db().seller.update({ where: { id: shop.id }, data: { qrCodeUrl } });
+    await assert.rejects(lockItem(firstPublish.id, "a".repeat(64), async () => { throw new Error("Missing payment image."); }), /Missing payment image/);
+    assert.equal((await readItem(firstPublish.id))?.item.status, "AVAILABLE");
+    const { quote: amendedQuote } = await lockItem(firstPublish.id, "a".repeat(64), async url => { assert.equal(url, qrCodeUrl); });
+    assert.equal(amendedQuote.itemAmount, "40.00");
+    await assert.rejects(editGarment(shop.id, firstPublish.id, values, null), { status: 409 });
+    await assert.rejects(editGarment(other.id, firstPublish.id, values, null), { status: 409 });
   } finally {
     await db().$disconnect();
     await rm(directory, { recursive: true, maxRetries: 5 });
@@ -185,6 +267,18 @@ test("order migration flags legacy Ship Now orders and keeps old dispatch reques
       ["old-ship", 1, null, "Vintage tee"], ["old-sent", 0, null, "Vintage tee"],
       ["old-hold-one", 0, "old-hold-one", "Vintage tee"], ["old-hold-two", 0, "old-hold-two", "Vintage tee"],
     ]);
+    await client.execute('UPDATE "Order" SET "shippedAt" = ? WHERE "id" = ?', ["2026-11-24", "old-ship"]);
+    await client.executeMultiple(await readFile(new URL("20261126100000_checkout_recovery/migration.sql", migrations), "utf8"));
+    const shipments = (await client.execute('SELECT "id", "shippedAt", "shipmentReconciledAt" FROM "Order" ORDER BY rowid')).rows;
+    assert.deepEqual(shipments.slice(0, 2).map(row => [row.id, row.shippedAt, row.shipmentReconciledAt]), [
+      ["old-ship", null, "2026-11-24"], ["old-sent", "2026-11-22", null],
+    ]);
+    await client.execute(`UPDATE "Order" SET "paymentStatus" = 'REJECTED', "transferReportedAt" = '2026-11-24',
+      "transferResolvedAt" = '2026-11-25', "transferResolution" = 'REFUNDED' WHERE "id" = 'old-ship'`);
+    await client.executeMultiple(await readFile(new URL("20261127100000_refund_follow_up/migration.sql", migrations), "utf8"));
+    const priorRefund = (await client.execute(`SELECT "transferResolvedAt", "transferResolution", "refundReference" FROM "Order" WHERE "id" = 'old-ship'`)).rows[0];
+    assert.deepEqual([priorRefund.transferResolvedAt, priorRefund.transferResolution, priorRefund.refundReference], [null, "REFUNDED", null]);
+    assert.equal((await client.execute('SELECT "kind" FROM "TransferEvent"')).rows[0]?.kind, "REFUNDED");
   } finally {
     client.close();
   }

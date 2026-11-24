@@ -8,6 +8,7 @@ export const token = z.string().regex(tokenPattern);
 export const receiptRejection = z.enum(Object.keys(receiptRejectionLabels) as (keyof typeof receiptRejectionLabels)[], {
   error: "Choose a reason for rejecting this receipt.",
 });
+export const transferReference = z.string().trim().min(3, "Enter the transfer reference from your bank.").max(120);
 export const phone = z.string().trim().max(30).transform(normalizePhone).pipe(z.string().regex(/^60[1-9]\d{7,9}$/, "Enter a valid Malaysian WhatsApp number."));
 export const delivery = z.object({
   buyerName: z.string().trim().min(2, "Enter the buyer's name.").max(100),
@@ -17,7 +18,19 @@ export const delivery = z.object({
 });
 export const assetUrl = z.string().regex(/^\/api\/media\/[a-f0-9-]{36}\.webp$/);
 const price = z.string().regex(/^\d{1,6}(\.\d{1,2})?$/, "Enter a valid RM amount.");
-export const listing = z.object({
+export const transferVersion = z.number().int().nonnegative();
+export const sellerTransferUpdate = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("TRANSFER_NOT_FOUND") }),
+  z.object({ type: z.literal("REFUNDED"), amount: z.string().regex(/^\d{1,7}(\.\d{1,2})?$/, "Enter a valid refund amount in RM."), sentOn: z.iso.date(), reference: transferReference,
+    note: z.string().trim().max(500).optional() }),
+]);
+export const buyerTransferUpdate = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("CORRECT_REFERENCE"), reference: transferReference }),
+  z.object({ type: z.literal("CONFIRM_REFUND") }),
+  z.object({ type: z.literal("DISPUTE_REFUND") }),
+  z.object({ type: z.literal("REQUEST_HELP") }),
+]);
+const listingFields = z.object({
   title: z.string().trim().min(2).max(100),
   brand: z.string().trim().min(1).max(70),
   category: z.enum(categories),
@@ -28,10 +41,15 @@ export const listing = z.object({
   conditionNotes: z.string().trim().max(1000),
   images: z.array(assetUrl).min(1).max(3),
   flawPins: z.array(z.object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100), note: z.string().trim().min(1).max(180), photo: z.enum(["front", "back"]).optional() })).max(12),
-}).refine(value => value.images.length > 1 || !value.flawPins.some(pin => pin.photo === "back"), {
+});
+const hasBackForFlaws = (value: z.infer<typeof listingFields>) => value.images.length > 1 || !value.flawPins.some(pin => pin.photo === "back");
+const backPhotoError = {
   message: "Add a back photo before marking back flaws.",
   path: ["flawPins"],
-});
+};
+export const listing = listingFields.refine(hasBackForFlaws, backPhotoError);
+export const listingEdit = listingFields.extend({ images: z.array(z.string().min(1).max(300)).min(1).max(3) })
+  .refine(hasBackForFlaws, backPhotoError);
 export const settings = z.object({
   qrCodeUrl: z.union([assetUrl, z.literal("/sample/duitnow.svg")]),
   qrAccountName: z.string().trim().min(2).max(100),

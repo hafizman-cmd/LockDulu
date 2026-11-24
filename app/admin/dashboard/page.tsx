@@ -3,8 +3,9 @@ import { ArrowUpRight, LayoutGrid, LogOut, ShieldCheck, Store, Tag, CirclePause 
 import { AdminLogin } from "@/components/admin-login";
 import { AdminShopActions } from "@/components/admin-shop-actions";
 import { Footer, Header, Notice } from "@/components/common";
-import { adminOverview } from "@/lib/admin";
+import { adminOverview, adminTransferCases } from "@/lib/admin";
 import { adminPasswordMaxLength, adminPath, adminSignInEnabled, currentAdmin } from "@/lib/admin-auth";
+import { money, rejectionMessage, transferEventLabels, whatsapp } from "@/lib/catalog";
 import { logoutAdmin } from "./actions";
 
 export const metadata = { title: "Admin dashboard", robots: { index: false, follow: false } };
@@ -13,7 +14,12 @@ export const dynamic = "force-dynamic";
 const numbers = new Intl.NumberFormat("en-MY");
 const dates = new Intl.DateTimeFormat("en-MY", { dateStyle: "medium", timeZone: "Asia/Kuala_Lumpur" });
 
-export default async function AdminDashboardPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
+function pageNumber(value: string | undefined) {
+  const page = Number(value);
+  return Number.isSafeInteger(page) && page > 0 ? page : 1;
+}
+
+export default async function AdminDashboardPage({ searchParams }: { searchParams: Promise<{ page?: string; helpPage?: string }> }) {
   if (!await currentAdmin()) {
     return <>
       <Header />
@@ -28,8 +34,9 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
     </>;
   }
 
-  const requestedPage = Number((await searchParams).page);
-  const overview = await adminOverview(Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1);
+  const params = await searchParams;
+  const [overview, cases] = await Promise.all([adminOverview(pageNumber(params.page)), adminTransferCases(pageNumber(params.helpPage))]);
+  const pageHref = (shopPage: number, helpPage: number, section: string) => `${adminPath}?page=${shopPage}&helpPage=${helpPage}#${section}`;
   const metrics = [
     { label: "Registered shops", value: overview.shops, icon: Store },
     { label: "Listings", value: overview.listings, icon: Tag },
@@ -57,6 +64,34 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
         </div>)}
       </dl>
 
+      <section className="surface admin-shops stack" aria-labelledby="transfer-help">
+        <h2 id="transfer-help">Transfer help requests ({cases.count})</h2>
+        {cases.orders.length === 0 && <p className="muted">No open transfer help requests.</p>}
+        {cases.orders.map(order => <details className="surface receipt-order stack" key={order.id}>
+          <summary>{order.seller.storeName} · {order.garmentCode} · {money(order.totalAmount.toFixed(2))}</summary>
+          <p>Order {order.id} · @{order.seller.storeSlug}</p>
+          <p>Original payment reference · {order.transferReference}</p>
+          {order.refundNote && <p>Seller message · {order.refundNote}</p>}
+          {order.rejectionReason && <p>{rejectionMessage(order.rejectionReason)}</p>}
+          <div className="button-row">
+            {order.buyerPhone && <a className="button" href={whatsapp(order.buyerPhone)} target="_blank" rel="noreferrer">Message buyer</a>}
+            {order.seller.whatsappNumber && <a className="button" href={whatsapp(order.seller.whatsappNumber)} target="_blank" rel="noreferrer">Message seller</a>}
+          </div>
+          <ul className="history-events">
+            {order.transferReportedAt && <li>Buyer reported a bank transfer · <time dateTime={order.transferReportedAt.toISOString()}>{dates.format(order.transferReportedAt)}</time></li>}
+            {[...order.transferEvents].reverse().map(event => <li key={event.version}>
+              {transferEventLabels[event.kind] ?? "Transfer report updated"} · <time dateTime={event.createdAt.toISOString()}>{dates.format(event.createdAt)}</time>
+              {event.detail && <> · {event.detail}</>}
+            </li>)}
+          </ul>
+        </details>)}
+        {cases.pageCount > 1 && <nav className="admin-pagination" aria-label="Transfer help pages">
+          {cases.page > 1 && <Link className="button" href={pageHref(overview.page, cases.page - 1, "transfer-help")}>Previous</Link>}
+          <p className="muted">Page {cases.page} of {cases.pageCount}</p>
+          {cases.page < cases.pageCount && <Link className="button" href={pageHref(overview.page, cases.page + 1, "transfer-help")}>Next</Link>}
+        </nav>}
+      </section>
+
       <section className="surface admin-shops" aria-labelledby="manage-shops">
         <h2 id="manage-shops"><LayoutGrid size={20} aria-hidden="true" /> Manage shops</h2>
         {overview.shopRows.length ? <div className="admin-table-scroll" role="region" aria-label="Shops table" tabIndex={0}>
@@ -80,9 +115,9 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
           </table>
         </div> : <p className="muted">No shops have registered yet.</p>}
         {overview.pageCount > 1 && <nav className="admin-pagination" aria-label="Shop pages">
-          {overview.page > 1 && <Link className="button" href={`${adminPath}?page=${overview.page - 1}`}>Previous</Link>}
+          {overview.page > 1 && <Link className="button" href={pageHref(overview.page - 1, cases.page, "manage-shops")}>Previous</Link>}
           <p className="muted">Page {overview.page} of {overview.pageCount}</p>
-          {overview.page < overview.pageCount && <Link className="button" href={`${adminPath}?page=${overview.page + 1}`}>Next</Link>}
+          {overview.page < overview.pageCount && <Link className="button" href={pageHref(overview.page + 1, cases.page, "manage-shops")}>Next</Link>}
         </nav>}
       </section>
     </main>

@@ -5,7 +5,11 @@ export const activeShop = { status: "ACTIVE" } as const;
 export const existingShop = { status: { not: "DELETED" } } as const;
 
 export const unresolvedOrder: Prisma.OrderWhereInput = {
-  OR: [{ paymentStatus: "PENDING_VERIFICATION" }, { paymentStatus: "VERIFIED_PAID", shippedAt: null }],
+  OR: [
+    { paymentStatus: "PENDING_VERIFICATION" },
+    { paymentStatus: "VERIFIED_PAID", shippedAt: null, shipmentReconciledAt: null },
+    { transferReportedAt: { not: null }, transferResolvedAt: null },
+  ],
 };
 
 export async function requireOrderSeller(db: Pick<Prisma.TransactionClient, "seller">, sellerId: string) {

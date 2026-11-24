@@ -43,6 +43,25 @@ export function rejectionMessage(reason: string | null | undefined) {
     : "The seller could not verify your payment. Contact them if you already paid.";
 }
 
+export const transferResolutions = {
+  REFUNDED: "Seller reports a refund",
+  TRANSFER_NOT_FOUND: "Seller needs more information",
+} as const;
+export type TransferResolution = keyof typeof transferResolutions;
+
+export function transferResolutionLabel(value: string) {
+  return Object.hasOwn(transferResolutions, value) ? transferResolutions[value as TransferResolution] : "Seller updated the transfer report";
+}
+
+export const transferEventLabels: Record<string, string> = {
+  REFUNDED: "Seller reported a refund",
+  TRANSFER_NOT_FOUND: "Seller could not match the transfer",
+  CORRECT_REFERENCE: "Buyer updated the payment reference",
+  CONFIRM_REFUND: "Buyer confirmed receipt of the full refund",
+  DISPUTE_REFUND: "Buyer said the full refund hadn’t arrived",
+  REQUEST_HELP: "Buyer requested help from LockDulu",
+};
+
 export function holdBoxDaysLeft(verifiedAt: string, holdBoxDays: number, now: number) {
   return Math.ceil((Date.parse(verifiedAt) + holdBoxDays * 86_400_000 - now) / 86_400_000);
 }

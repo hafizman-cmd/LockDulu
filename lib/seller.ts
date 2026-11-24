@@ -1,13 +1,31 @@
 import { randomUUID } from "node:crypto";
+import type { Prisma } from "@/generated/prisma/client";
 import { db, writeTransaction } from "./db.ts";
 import { HttpError } from "./http.ts";
 import { garmentImages, garmentView, openDueDrops, releaseExpired } from "./inventory.ts";
+import { paymentConfigured } from "./payment.ts";
 import { hashToken } from "./security.ts";
 import { existingShop, requireActiveSeller, requireOrderSeller, unresolvedOrder } from "./shop-status.ts";
 import type { z } from "zod";
 import type { listing, newDrop, settings, shopProfile } from "./validation";
 
 const orderInclude = { items: { include: { garment: { include: { drop: true } } } } } as const;
+
+function transferView(order: Prisma.OrderGetPayload<{}>) {
+  return {
+    transferReported: !!order.transferReportedAt,
+    transferResolution: order.transferResolution,
+    transferVersion: order.transferVersion,
+    transferResolvedAt: order.transferResolvedAt?.toISOString() ?? null,
+    transferEscalated: !!order.transferEscalatedAt,
+    transferReference: order.transferReference,
+    refundDisputed: !!order.refundDisputedAt,
+    refundAmount: order.refundAmount?.toFixed(2) ?? null,
+    refundSentOn: order.refundSentOn,
+    refundReference: order.refundReference,
+    refundNote: order.refundNote,
+  };
+}
 
 export async function dashboardData(sellerId: string) {
   const seller = await db().seller.findUnique({
@@ -26,9 +44,13 @@ export async function dashboardData(sellerId: string) {
     db().drop.findMany({ where: { sellerId, status: { not: "ENDED" } }, orderBy: { scheduledAt: "asc" } }),
   ]);
   return {
-    seller: { ...seller, shippingFee: seller.shippingFee.toFixed(2) },
+    seller: { ...seller, paymentReady: paymentConfigured(seller), shippingFee: seller.shippingFee.toFixed(2) },
     items: items.map(garmentView),
     drops: drops.map(drop => ({ id: drop.id, title: drop.title, status: drop.status, scheduledAt: drop.scheduledAt.toISOString() })),
+    transferReports: orders.filter(order => order.transferReportedAt && !order.transferResolvedAt).map(order => ({
+      id: order.id, code: order.garmentCode, title: order.garmentTitle, reference: order.transferReference,
+      buyerName: order.buyerName, buyerPhone: order.buyerPhone, total: order.totalAmount.toFixed(2), ...transferView(order),
+    })),
     orders: orders.flatMap(order => {
       const garment = order.items[0]?.garment;
       if (!garment) return [];
@@ -73,6 +95,9 @@ export async function sellerHistory(sellerId: string, requestedPage: number) {
         createdAt: order.createdAt.toISOString(), receiptSubmittedAt: order.receiptSubmittedAt?.toISOString() ?? null,
         reviewedAt: order.reviewedAt?.toISOString() ?? null, dispatchRequestedAt: order.dispatchRequestedAt?.toISOString() ?? null,
         shippedAt: order.shippedAt?.toISOString() ?? null, shipmentUnconfirmed: order.shipmentUnconfirmed,
+        shipmentReconciledAt: order.shipmentReconciledAt?.toISOString() ?? null,
+        transferReportedAt: order.transferReportedAt?.toISOString() ?? null,
+        ...transferView(order),
       };
     }),
   };
@@ -99,18 +124,42 @@ export async function createDrop(sellerId: string, data: z.infer<typeof newDrop>
   });
 }
 
-export async function listGarment(sellerId: string, data: z.infer<typeof listing>, dropId: string | null) {
+async function requireListingDrop(tx: Prisma.TransactionClient, sellerId: string, dropId: string | null) {
+  if (dropId && !await tx.drop.findFirst({ where: { id: dropId, sellerId, status: { not: "ENDED" } } })) {
+    throw new HttpError("Select an active or upcoming drop.", 409);
+  }
+}
+
+export async function listGarment(sellerId: string, data: z.infer<typeof listing>, dropId: string | null, publishRequestId?: string) {
   return writeTransaction(async tx => {
     await requireActiveSeller(tx, sellerId);
-    if (dropId && !await tx.drop.findFirst({ where: { id: dropId, sellerId, status: { not: "ENDED" } } })) {
-      throw new HttpError("Select an active or upcoming drop.", 409);
+    if (publishRequestId) {
+      const existing = await tx.garment.findUnique({ where: { sellerId_publishRequestId: { sellerId, publishRequestId } }, select: { id: true, code: true } });
+      if (existing) return existing;
     }
+    await requireListingDrop(tx, sellerId, dropId);
     const seller = await tx.seller.update({
       where: { id: sellerId }, data: { nextItemNumber: { increment: 1 } }, select: { nextItemNumber: true },
     });
     const code = `B-${String(seller.nextItemNumber - 1).padStart(3, "0")}`;
-    const item = await tx.garment.create({ data: { ...data, code, sellerId, dropId }, select: { id: true, code: true } });
+    const item = await tx.garment.create({ data: { ...data, code, sellerId, dropId, publishRequestId }, select: { id: true, code: true } });
     return item;
+  });
+}
+
+export async function editGarment(sellerId: string, garmentId: string, data: z.infer<typeof listing>, dropId: string | null) {
+  await releaseExpired({ id: garmentId, sellerId });
+  return writeTransaction(async tx => {
+    await requireActiveSeller(tx, sellerId);
+    const where = { id: garmentId, sellerId, deletedAt: null, status: "AVAILABLE", orderItem: null } as const;
+    const existing = await tx.garment.findFirst({ where, select: { code: true, dropId: true, images: true } });
+    if (!existing) throw new HttpError("Only available listings without an open order can be edited.", 409);
+    if (dropId !== existing.dropId) await requireListingDrop(tx, sellerId, dropId);
+    const previousImages = garmentImages(existing.images);
+    if (data.images.some(url => !/^\/api\/media\/[a-f0-9-]{36}\.webp$/.test(url) && !previousImages.includes(url))) {
+      throw new HttpError("Upload a photo to replace a listing image.");
+    }
+    return tx.garment.update({ where, data: { ...data, dropId }, select: { id: true, code: true } });
   });
 }
 
@@ -177,8 +226,10 @@ export async function markShipped(sellerId: string, orderIds: string[]) {
     } else if (orders.length !== 1) {
       throw new HttpError("Mark each Ship Now order shipped separately.", 409);
     }
-    if (orders.every(order => order.shippedAt)) return { ok: true };
-    if (orders.some(order => order.shippedAt)) throw new HttpError("The parcel has changed. Refresh before packing.", 409);
+    if (orders.every(order => order.shippedAt || order.shipmentReconciledAt)) return { ok: true };
+    if (orders.some(order => order.shippedAt || order.shipmentReconciledAt || order.shipmentUnconfirmed)) {
+      throw new HttpError("The shipment status has changed. Refresh before packing.", 409);
+    }
     if (first.fulfillmentType === "HOLD_BOX") {
       const ids = orders.flatMap(order => order.items.map(item => item.garmentId));
       const updated = await tx.garment.updateMany({
@@ -194,11 +245,22 @@ export async function markShipped(sellerId: string, orderIds: string[]) {
   });
 }
 
+export async function reconcileShipment(sellerId: string, orderId: string) {
+  return writeTransaction(async tx => {
+    await requireOrderSeller(tx, sellerId);
+    const where = { id: orderId, sellerId, paymentStatus: "VERIFIED_PAID", fulfillmentType: "SHIP_NOW", shippedAt: null } as const;
+    const { count } = await tx.order.updateMany({ where: { ...where, shipmentUnconfirmed: true, shipmentReconciledAt: null },
+      data: { shipmentUnconfirmed: false, shipmentReconciledAt: new Date() } });
+    if (count || await tx.order.findFirst({ where: { ...where, shipmentReconciledAt: { not: null } }, select: { id: true } })) return { ok: true };
+    throw new HttpError("This order is no longer awaiting shipment review. Refresh the queue.", 409);
+  });
+}
+
 export async function queueShipment(sellerId: string, orderId: string) {
   return writeTransaction(async tx => {
     await requireOrderSeller(tx, sellerId);
     const { count } = await tx.order.updateMany({
-      where: { id: orderId, sellerId, paymentStatus: "VERIFIED_PAID", fulfillmentType: "SHIP_NOW", shippedAt: null },
+      where: { id: orderId, sellerId, paymentStatus: "VERIFIED_PAID", fulfillmentType: "SHIP_NOW", shippedAt: null, shipmentReconciledAt: null },
       data: { shipmentUnconfirmed: false },
     });
     if (!count) throw new HttpError("This order is no longer available to ship.", 409);
@@ -230,10 +292,15 @@ export async function lockerLookup(orderId: string, tokens: string[]) {
       itemId: item?.id ?? null, holdBoxDays: order.holdBoxDays, total: order.totalAmount.toFixed(2),
       fulfillmentType: order.fulfillmentType, rejectionReason: order.rejectionReason,
       shippingAddress: order.shippingAddress, shipmentUnconfirmed: order.shipmentUnconfirmed,
+      canReportTransfer: !!order.buyerPhone && !order.transferReportedAt && order.seller.status !== "DELETED" &&
+        (order.paymentStatus === "EXPIRED" || order.paymentStatus === "REJECTED" ||
+          order.paymentStatus === "AWAITING_RECEIPT" && !!item?.lockedUntil && item.lockedUntil <= now),
+      ...transferView(order),
       verifiedAt: order.verifiedAt?.toISOString() ?? null,
       dispatchRequestedAt: order.dispatchRequestedAt?.toISOString() ?? null,
       dispatchGroupId: order.dispatchGroupId,
       shippedAt: order.shippedAt?.toISOString() ?? null,
+      shipmentReconciledAt: order.shipmentReconciledAt?.toISOString() ?? null,
     };
   });
 }

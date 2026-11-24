@@ -104,6 +104,13 @@ export function Notice({ children, success = false }: { children: React.ReactNod
   return <p className={`notice ${success ? "success" : ""}`} role={success ? "status" : "alert"}><Icon size={18} strokeWidth={1.5} />{children}</p>;
 }
 
+export function AvailabilityNotice({ serverTime }: { serverTime: number }) {
+  const confirmed = new Date(serverTime);
+  return <p className="muted" role="status">Availability may be out of date. Last checked at{" "}
+    <time dateTime={confirmed.toISOString()}>{confirmed.toLocaleTimeString("en-MY", { hour: "numeric", minute: "2-digit" })}</time>.
+    Check your connection to refresh.</p>;
+}
+
 export function OrderReference({ number, showHint = false }: { number: string; showHint?: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   const [feedback, setFeedback] = useState("");

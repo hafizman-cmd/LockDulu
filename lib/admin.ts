@@ -30,6 +30,23 @@ export async function adminOverview(requestedPage: number) {
     shopRows: shopRows.map(shop => ({ ...shop, unresolvedOrders: openCounts.get(shop.id) ?? 0 })) };
 }
 
+export async function adminTransferCases(requestedPage: number) {
+  const where = { transferEscalatedAt: { not: null }, transferResolvedAt: null } as const;
+  const database = db();
+  const count = await database.order.count({ where });
+  const pageCount = Math.max(1, Math.ceil(count / shopsPerPage));
+  const page = Math.min(requestedPage, pageCount);
+  const orders = await database.order.findMany({ where, skip: (page - 1) * shopsPerPage, take: shopsPerPage,
+    orderBy: [{ transferEscalatedAt: "asc" }, { id: "asc" }],
+    select: { id: true, buyerPhone: true, totalAmount: true, garmentCode: true, transferReference: true,
+      transferReportedAt: true, refundNote: true, rejectionReason: true,
+      seller: { select: { storeName: true, storeSlug: true, whatsappNumber: true } },
+      transferEvents: { orderBy: { version: "desc" }, take: 20, select: { version: true, kind: true, createdAt: true, detail: true } },
+    },
+  });
+  return { orders, count, page, pageCount };
+}
+
 export type ShopModeration = "hold" | "resume" | "delete";
 
 export async function moderateShop(sellerId: string, command: ShopModeration) {
@@ -61,7 +78,7 @@ export async function moderateShop(sellerId: string, command: ShopModeration) {
     if (command === "hold" && shop.status === "HELD") throw new HttpError("This shop is already on hold.", 409);
     if (shop._count.garments) throw new HttpError("A buyer has an active garment lock. Try again after the lock ends.", 409);
     if (command === "delete" && shop._count.orders) {
-      throw new HttpError("Resolve the shop’s pending receipts and unshipped orders before deleting it.", 409);
+      throw new HttpError("Resolve the shop’s pending receipts, unshipped orders, and open transfer reports before deleting it.", 409);
     }
     throw new HttpError("The shop status changed. Reload the dashboard.", 409);
   });
