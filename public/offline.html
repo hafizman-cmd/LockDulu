@@ -1,3 +1,40 @@
-<!doctype html><html lang="en-MY"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Offline | LockDulu</title><style>
-:root{color-scheme:light dark}body{margin:0;min-height:100dvh;display:grid;place-items:center;background:#f6f5f2;color:#18181b;font:16px system-ui}main{max-width:27rem;padding:2rem}h1{line-height:1.1}a{display:inline-block;color:inherit;margin-top:.5rem;font-weight:650}@media(prefers-color-scheme:dark){body{background:#111113;color:#f4f4f5}}
-</style></head><body><main><img src="/icon.svg" alt="LockDulu" width="54" height="54"><h1>You’re offline</h1><p>Reconnect to check live inventory, lock a piece, or submit a payment receipt.</p><a href="/">Retry storefront</a></main></body></html>
+<!doctype html>
+<html lang="en-MY">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Offline | LockDulu</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; background: #f6f5f2; color: #18181b; font: 16px system-ui; }
+    main { max-width: 27rem; padding: 2rem; }
+    h1 { line-height: 1.1; }
+    button { min-height: 44px; padding: .55rem 1rem; color: inherit; background: transparent; border: 1px solid currentColor; border-radius: .5rem; font: inherit; font-weight: 650; cursor: pointer; }
+    @media (prefers-color-scheme: dark) { body { background: #111113; color: #f4f4f5; } }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="/icon.svg" alt="LockDulu" width="54" height="54">
+    <h1>You’re offline</h1>
+    <p>Reconnect to check live inventory, lock a piece, or submit a payment receipt.</p>
+    <button id="retry" type="button">Retry this page</button>
+  </main>
+  <script>
+    const retry = () => window.location.reload();
+    const retryWhenReachable = async () => {
+      if (!navigator.onLine || document.visibilityState === "hidden") return;
+      try {
+        const response = await fetch("/offline.html", { method: "HEAD", cache: "no-store" });
+        if (response.ok && navigator.onLine) retry();
+      } catch { /* Keep the retry button available while the server is unreachable. */ }
+    };
+    document.getElementById("retry").addEventListener("click", retry);
+    window.addEventListener("online", retryWhenReachable);
+    document.addEventListener("visibilitychange", retryWhenReachable);
+    window.addEventListener("pageshow", event => {
+      if (event.persisted) retryWhenReachable();
+    });
+  </script>
+</body>
+</html>

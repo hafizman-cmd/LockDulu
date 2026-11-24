@@ -23,5 +23,5 @@ export async function generateMetadata({ params }: Props) {
 export default async function ItemPage({ params }: Props) {
   const data = await loadItem((await params).id);
   if (!data) notFound();
-  return <ItemDetail initial={data} />;
+  return <ItemDetail key={data.item.id} initial={data} />;
 }

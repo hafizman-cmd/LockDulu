@@ -94,6 +94,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
     }
   }, [id, router]);
   const [data, setData, stale] = usePolling(initial, get);
+  const [initialServerTime] = useState(initial.serverTime);
   const [lockTime, setLockTime] = useState(0);
   const now = useClock(Math.max(lockTime, data.serverTime));
   const [active, setActive] = useState<SavedLock | null>(null);
@@ -109,12 +110,14 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [pendingRecovery, setPendingRecovery] = useState<SavedLock | null>(null);
   const [receiptUnconfirmed, setReceiptUnconfirmed] = useState(false);
   const [expandedQr, setExpandedQr] = useState(false);
   const [qrFailed, setQrFailed] = useState(false);
   const [qrRetry, setQrRetry] = useState(0);
   const item = data.item;
   const addressRef = useRef<HTMLInputElement>(null);
+  const restoreRequest = useRef<AbortController | null>(null);
   const refresh = useCallback(() => get().then(next => setData(current => next.serverTime >= current.serverTime ? next : current)).catch(() => {}), [get, setData]);
 
   const rememberOrder = useCallback((stored: SavedLock, result: Completed) => {
@@ -127,40 +130,68 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
     setReceiptUnconfirmed(false);
   }, []);
 
+  const recoverCheckout = useCallback(async (stored: SavedLock, showOutcome: boolean) => {
+    const { orderId, token } = stored;
+    if (!orderId || restoreRequest.current) return;
+    const aborter = new AbortController();
+    restoreRequest.current = aborter;
+    setRestoring(true);
+    try {
+      const result = await action<OrderState>("order", { id: orderId, token }, aborter.signal);
+      if (aborter.signal.aborted) return;
+      setLockTime(result.serverTime);
+      if (result.quote) {
+        setQuote(result.quote);
+        if (result.delivery) setDelivery(result.delivery);
+        setPreparedTotal(result.paymentTotal);
+        setStep(result.paymentTotal ? 2 : 1);
+        setOpen(true);
+      } else if (result.status !== "AWAITING_RECEIPT") {
+        rememberOrder(stored, { orderId, code: result.code, status: result.status, rejectionReason: result.rejectionReason });
+        if (showOutcome || result.status === "PENDING_VERIFICATION") setOpen(true);
+      }
+      setPendingRecovery(null);
+      setError("");
+    } catch (exception) {
+      if (aborter.signal.aborted) return;
+      if (exception instanceof RequestError && exception.status === 404) setPendingRecovery(null);
+      setError(`Could not recover your checkout. ${message(exception)}`);
+    } finally {
+      if (restoreRequest.current === aborter) {
+        restoreRequest.current = null;
+        setRestoring(false);
+      }
+    }
+  }, [rememberOrder]);
+
   useEffect(() => {
     removeLocal("lockdulu.delivery");
     const savedDelivery = readLocal<Delivery | null>(deliveryKey, null);
     if (savedDelivery) { setDelivery(savedDelivery); setRememberDelivery(true); }
     const locks = savedLocks().filter(lock => lock.itemId === id);
-    const stored = locks.find(lock => !lock.submitted && (!lock.lockedUntil || Date.parse(lock.lockedUntil) > initial.serverTime)) ??
+    const stored = locks.find(lock => !lock.submitted && (!lock.lockedUntil || Date.parse(lock.lockedUntil) > initialServerTime)) ??
       locks.find(lock => lock.submitted || lock.orderId);
     if (!stored) return;
     setActive(stored);
-    const orderId = stored.orderId;
-    if (!orderId) return;
-    const aborter = new AbortController();
-    setRestoring(true);
-    action<OrderState>("order", { id: orderId, token: stored.token }, aborter.signal).then(result => {
-      if (aborter.signal.aborted) return;
-      setLockTime(result.serverTime);
-      if (result.quote) {
-        setQuote(result.quote);
-        if (result.delivery) {
-          setDelivery(result.delivery);
-          setPreparedTotal(result.paymentTotal);
-          setStep(result.paymentTotal ? 2 : 1);
-        }
-        setOpen(true);
-      }
-      else if (result.status !== "AWAITING_RECEIPT") {
-        rememberOrder(stored, { orderId, code: result.code, status: result.status, rejectionReason: result.rejectionReason });
-        if (result.status === "PENDING_VERIFICATION") setOpen(true);
-      }
-    }).catch(exception => {
-      if (!aborter.signal.aborted) setError(`Could not recover your checkout. ${message(exception)}`);
-    }).finally(() => { if (!aborter.signal.aborted) setRestoring(false); });
-    return () => aborter.abort();
-  }, [id, initial.serverTime, rememberOrder]);
+    setPendingRecovery(stored.orderId ? stored : null);
+    return () => { restoreRequest.current?.abort(); };
+  }, [id, initialServerTime]);
+
+  useEffect(() => {
+    if (!pendingRecovery) return;
+    const recover = () => {
+      if (navigator.onLine && document.visibilityState !== "hidden") void recoverCheckout(pendingRecovery, false);
+    };
+    recover();
+    window.addEventListener("online", recover);
+    window.addEventListener("pageshow", recover);
+    document.addEventListener("visibilitychange", recover);
+    return () => {
+      window.removeEventListener("online", recover);
+      window.removeEventListener("pageshow", recover);
+      document.removeEventListener("visibilitychange", recover);
+    };
+  }, [pendingRecovery, recoverCheckout]);
 
   const itemUntil = item.lockedUntil ? Date.parse(item.lockedUntil) : 0;
   const quoteUntil = quote ? Date.parse(quote.lockedUntil) : 0;
@@ -170,8 +201,9 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
   const isAvailable = item.status === "AVAILABLE" && item.locksOpen && data.store.paymentReady;
   const canViewOrder = !!done && done.status !== "EXPIRED" && done.status !== "REJECTED";
   const running = !!quote && !expired && !done;
-  const canRetry = active && !active.submitted && !quote && !done && (item.status === "LOCKED" || item.status === "PENDING_VERIFICATION" ||
-    item.status === "HOLD_BOX" || item.status === "SOLD") && (!active.lockedUntil || !!active.orderId);
+  const canRetry = !!pendingRecovery || (active && !active.submitted && !quote && !done &&
+    (item.status === "LOCKED" || item.status === "PENDING_VERIFICATION" || item.status === "HOLD_BOX" || item.status === "SOLD") &&
+    (!active.lockedUntil || !!active.orderId));
 
   useEffect(() => { if (expired) void refresh(); }, [expired, refresh]);
   const itemLockExpired = itemUntil > 0 && itemUntil <= now;
@@ -197,32 +229,22 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
     const check = () => void checkPayment();
     const interval = window.setInterval(check, 4000);
     document.addEventListener("visibilitychange", check);
+    window.addEventListener("online", check);
+    window.addEventListener("pageshow", check);
     return () => {
       aborter.abort();
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", check);
+      window.removeEventListener("online", check);
+      window.removeEventListener("pageshow", check);
     };
   }, [active, done, refresh]);
 
   async function startLock() {
     setError("");
     if (running || canViewOrder) { setOpen(true); return; }
-    if (canRetry && active.orderId) {
-      setBusy(true);
-      try {
-        const result = await action<OrderState>("order", { id: active.orderId, token: active.token });
-        setLockTime(result.serverTime);
-        if (result.quote) {
-          setQuote(result.quote);
-          if (result.delivery) setDelivery(result.delivery);
-          setPreparedTotal(result.paymentTotal);
-          setStep(result.paymentTotal ? 2 : 1);
-        } else if (result.status !== "AWAITING_RECEIPT") {
-          rememberOrder(active, { orderId: active.orderId, code: result.code, status: result.status, rejectionReason: result.rejectionReason });
-        }
-        setOpen(true);
-      } catch (exception) { setError(message(exception)); }
-      finally { setBusy(false); }
+    if (canRetry && active?.orderId) {
+      await recoverCheckout(active, true);
       return;
     }
     const retry = active && !active.submitted && !active.lockedUntil;
@@ -318,6 +340,18 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
     finally { setBusy(false); }
   }
 
+  function backToPreviousPage(event: React.MouseEvent<HTMLAnchorElement>) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const navigation = (window as Window & { navigation?: { canGoBack: boolean } }).navigation;
+    const loadedUrl = performance.getEntriesByType("navigation")[0]?.name;
+    // Some browsers count an initial blank tab in history.length.
+    const hasPrevious = navigation?.canGoBack ?? (window.history.length > 1 &&
+      (!!document.referrer || (!!loadedUrl && loadedUrl !== window.location.href)));
+    if (!hasPrevious) return;
+    event.preventDefault();
+    router.back();
+  }
+
   const storeHref = `/${data.store.storeSlug}`;
   const exact = quote && (delivery.fulfillmentType === "SHIP_NOW" ? quote.shipTotal : quote.itemAmount);
   const lockedByAnother = item.status === "LOCKED" && !running && !canRetry;
@@ -331,7 +365,9 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
   return <>
     <Header storeSlug={data.store.storeSlug} />
     <main className="wrap item-page">
-      <Link className="breadcrumb" href={storeHref}><ChevronLeft size={18} strokeWidth={1.5} /> {data.store.storeName}</Link>
+      <Link className="breadcrumb" href={storeHref} replace prefetch={false} onClick={backToPreviousPage}>
+        <ChevronLeft size={18} strokeWidth={1.5} aria-hidden="true" /> Back
+      </Link>
       <div className="detail-grid">
         <Gallery item={item} />
         <div className="detail-copy">
