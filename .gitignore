@@ -8,3 +8,6 @@ generated/
 public/uploads/
 .verification/
 prisma/*.db*
+.mcp.json
+/.agentsroom/
+/.claude/settings.local.json
