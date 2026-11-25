@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowUpRight, LayoutGrid, LogOut, ShieldCheck, Store, Tag, CirclePause } from "lucide-react";
+import { ArrowUpRight, LayoutGrid, LogOut, ShieldCheck, Store, Tag, CirclePause, LifeBuoy } from "lucide-react";
 import { AdminLogin } from "@/components/admin-login";
 import { AdminShopActions, AdminShopFeedback } from "@/components/admin-shop-actions";
 import { Footer, Header, Notice } from "@/components/common";
@@ -78,13 +78,26 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
           <dt><Icon size={18} strokeWidth={1.6} aria-hidden="true" /> {label}</dt>
           <dd>{numbers.format(value)}</dd>
         </div>)}
+        <div className="surface admin-metric">
+          <dt><LifeBuoy size={18} strokeWidth={1.6} aria-hidden="true" /> Transfer cases awaiting follow-up</dt>
+          <dd><a className="admin-metric-link" href="#transfer-help" aria-label={`View ${cases.count} open transfer help requests`}>
+            {numbers.format(cases.count)} <ArrowUpRight size={18} aria-hidden="true" />
+          </a></dd>
+        </div>
       </dl>
 
-      <section className="surface admin-shops stack" aria-labelledby="transfer-help">
-        <h2 id="transfer-help">Transfer help requests ({cases.count})</h2>
+      <section id="transfer-help" className="surface admin-shops stack" aria-labelledby="transfer-help-heading">
+        <h2 id="transfer-help-heading">Transfer help requests ({cases.count})</h2>
         {cases.orders.length === 0 && <p className="muted">No open transfer help requests.</p>}
         {cases.orders.map(order => <details className="surface receipt-order stack" key={order.id}>
-          <summary>{order.seller.storeName} · {order.garmentCode} · {money(order.totalAmount.toFixed(2))}</summary>
+          <summary className="admin-transfer-summary">
+            <strong>{order.seller.storeName} · {order.garmentCode} · {money(order.totalAmount.toFixed(2))}</strong>
+            <span className="admin-transfer-status muted">
+              {order.refundDisputedAt ? "Refund disputed" : order.transferResolution === "REFUNDED" ? "Refund awaiting confirmation"
+                : order.transferResolution === "TRANSFER_NOT_FOUND" ? "Transfer unmatched" : "Transfer awaiting review"}
+              {order.transferEscalatedAt && <> · Help requested <time dateTime={order.transferEscalatedAt.toISOString()}>{dates.format(order.transferEscalatedAt)}</time></>}
+            </span>
+          </summary>
           <p>Order {order.id} · @{order.seller.storeSlug}</p>
           <p>Original payment reference · {order.transferReference}</p>
           {order.refundNote && <p>Seller message · {order.refundNote}</p>}

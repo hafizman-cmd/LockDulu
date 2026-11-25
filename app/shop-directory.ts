@@ -1,9 +1,12 @@
 import { db } from "@/lib/db";
+import { garmentImages } from "@/lib/inventory";
+import { paymentConfigured } from "@/lib/payment";
 import { activeShop } from "@/lib/shop-status";
 
 const pageSize = 24;
 const orderBy = [{ storeName: "asc" }, { storeSlug: "asc" }] as const;
-const publicFields = { storeName: true, storeSlug: true, bio: true } as const;
+const visibleGarment = { hidden: false, deletedAt: null } as const;
+type ShopStatus = "available" | "browse" | "upcoming" | "empty" | "unavailable" | "sold-out";
 
 function searchKey(value: string) {
   return value.toLowerCase().replace(/\s+/g, "");
@@ -11,6 +14,7 @@ function searchKey(value: string) {
 
 export async function readDirectoryPage(query: string, requestedPage: number) {
   const database = db();
+  const now = new Date();
   const search = searchKey(query.trim().replace(/^@/, ""));
   // SQLite's lower() only folds ASCII. Check other names and whitespace in JS
   // so searches keep the same behaviour for all shop names.
@@ -36,9 +40,42 @@ export async function readDirectoryPage(query: string, requestedPage: number) {
   const shops = total ? await database.seller.findMany({
     where: { ...activeShop, ...(handles ? { storeSlug: { in: handles } } : {}) },
     orderBy: [...orderBy],
-    select: publicFields,
+    select: {
+      id: true, storeName: true, storeSlug: true, bio: true, bannerImageUrl: true,
+      qrCodeUrl: true, qrAccountName: true, qrBankLabel: true,
+      garments: { where: visibleGarment, orderBy: { code: "desc" }, take: 1, select: { images: true } },
+      drops: { where: { status: "UPCOMING", scheduledAt: { gt: now } }, orderBy: { scheduledAt: "asc" },
+        take: 1, select: { title: true, scheduledAt: true } },
+      _count: { select: { garments: { where: { ...visibleGarment, status: { notIn: ["SOLD", "HOLD_BOX"] } } } } },
+    },
     skip: handles ? 0 : offset,
     take: pageSize,
   }) : [];
-  return { shops, total, page, pageCount };
+  const available = shops.length ? await database.garment.groupBy({
+    by: ["sellerId"],
+    where: {
+      ...visibleGarment, sellerId: { in: shops.map(shop => shop.id) },
+      AND: [
+        { OR: [{ status: "AVAILABLE" }, { status: "LOCKED", lockedUntil: { lte: now } }] },
+        { OR: [{ dropId: null }, { drop: { status: "LIVE" } }, { drop: { status: "UPCOMING", scheduledAt: { lte: now } } }] },
+      ],
+    },
+  }) : [];
+  const shopsWithAvailability = new Set(available.map(group => group.sellerId));
+
+  return {
+    total, page, pageCount,
+    shops: shops.map(shop => {
+      const preview = shop.garments[0];
+      const nextDrop = shop.drops[0];
+      const status: ShopStatus = shopsWithAvailability.has(shop.id) ? (paymentConfigured(shop) ? "available" : "browse")
+        : nextDrop ? "upcoming" : !preview ? "empty" : shop._count.garments ? "unavailable" : "sold-out";
+      return {
+        storeSlug: shop.storeSlug, storeName: shop.storeName, bio: shop.bio,
+        previewImage: (preview && garmentImages(preview.images)[0]) || shop.bannerImageUrl,
+        status,
+        nextDrop: nextDrop ? { title: nextDrop.title, scheduledAt: nextDrop.scheduledAt.toISOString() } : null,
+      };
+    }),
+  };
 }

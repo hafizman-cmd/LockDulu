@@ -276,14 +276,31 @@ export async function lockerLookup(orderId: string, tokens: string[]) {
     where: { id: orderId, ...access }, select: { buyerPhone: true },
   });
   if (!tracked) throw new HttpError("Order not found in this browser. Check the order number and use the browser used at checkout.", 404);
-  const orders = await database.order.findMany({
-    where: { ...access, ...(tracked.buyerPhone ? { OR: [{ id: orderId }, { buyerPhone: tracked.buyerPhone }] } : { id: orderId }) },
+  return readLockerOrders({
+    ...access, ...(tracked.buyerPhone ? { OR: [{ id: orderId }, { buyerPhone: tracked.buyerPhone }] } : { id: orderId }),
+  });
+}
+
+export function lockerSavedOrders(tokens: string[]) {
+  return readLockerOrders({ buyerAccessHash: { in: tokens.map(hashToken) } });
+}
+
+async function readLockerOrders(where: Prisma.OrderWhereInput) {
+  const orders = await db().order.findMany({
+    where,
     include: { ...orderInclude, seller: { select: { id: true, status: true, storeName: true, whatsappNumber: true } } },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
   });
   const now = new Date();
+  const parcelGroups = new Map<string, string>();
   return orders.map(order => {
     const item = order.items[0]?.garment;
+    let parcelKey = order.id;
+    if (order.buyerPhone && order.fulfillmentType === "HOLD_BOX") {
+      const group = JSON.stringify([order.sellerId, order.buyerPhone, order.shippingAddress]);
+      parcelKey = parcelGroups.get(group) ?? order.id;
+      parcelGroups.set(group, parcelKey);
+    }
     return {
       id: order.id, code: order.garmentCode, title: order.garmentTitle ?? item?.title ?? order.garmentCode,
       image: item ? garmentImages(item.images)[0] ?? null : null,
@@ -292,7 +309,7 @@ export async function lockerLookup(orderId: string, tokens: string[]) {
         ? "AWAITING_RECEIPT" : order.paymentStatus === "AWAITING_RECEIPT" ? "EXPIRED" : order.paymentStatus,
       itemId: item?.id ?? null, holdBoxDays: order.holdBoxDays, total: order.totalAmount.toFixed(2),
       fulfillmentType: order.fulfillmentType, rejectionReason: order.rejectionReason,
-      shippingAddress: order.shippingAddress, shipmentUnconfirmed: order.shipmentUnconfirmed,
+      shippingAddress: order.shippingAddress, shipmentUnconfirmed: order.shipmentUnconfirmed, parcelKey,
       canReportTransfer: !!order.buyerPhone && !order.transferReportedAt && order.seller.status !== "DELETED" &&
         (order.paymentStatus === "EXPIRED" || order.paymentStatus === "REJECTED" ||
           order.paymentStatus === "AWAITING_RECEIPT" && !!item?.lockedUntil && item.lockedUntil <= now),

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Box, Clock3, MessageCircle, PackageCheck, Search } from "lucide-react";
+import { Box, Clock3, MessageCircle, PackageCheck, RefreshCw, Search } from "lucide-react";
 import type { LockerOrder } from "@/lib/seller";
 import { holdBoxDaysLeft, money, rejectionMessage, transferResolutionLabel, whatsapp } from "@/lib/catalog";
 import { action, message, savedLocks } from "./client";
@@ -25,6 +25,19 @@ function isPastOrder(order: LockerOrder) {
   return !!(order.shippedAt || order.shipmentReconciledAt) || (order.status === "REJECTED" || order.status === "EXPIRED") && (!order.transferReported || !!order.transferResolvedAt);
 }
 
+function orderView(order: LockerOrder): View {
+  return isPastOrder(order) ? "history" : openHoldBox(order) ? "hold" : "orders";
+}
+
+async function loadSavedOrders(signal?: AbortSignal) {
+  const tokens = savedLocks().filter(entry => entry.orderId).map(entry => entry.token);
+  if (!tokens.length) return [];
+  const result = await action<{ orders: LockerOrder[] }>("lockerSaved", { tokens }, signal);
+  return result.orders;
+}
+
+const orderNotFound = "This order wasn’t found in this browser. Check the order number and use the browser you used at checkout.";
+
 function orderLabel(order: LockerOrder, now: number) {
   if (order.transferResolvedAt) return "You confirmed your refund";
   if (order.refundDisputed) return "Refund follow-up needed";
@@ -43,12 +56,12 @@ function orderLabel(order: LockerOrder, now: number) {
   return days <= 0 ? "Hold Box overdue" : `${days} ${days === 1 ? "day" : "days"} left in Hold Box`;
 }
 
-export function Locker() {
-  const [number, setNumber] = useState("");
+export function Locker({ reference }: { reference: string }) {
+  const [number, setNumber] = useState(reference);
   const [trackedId, setTrackedId] = useState("");
   const [orders, setOrders] = useState<LockerOrder[] | null>(null);
   const [view, setView] = useState<View>("orders");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [now, setNow] = useState(0);
@@ -61,34 +74,54 @@ export function Locker() {
   const [reportError, setReportError] = useState("");
 
   useEffect(() => {
-    setNumber(new URLSearchParams(window.location.search).get("order") ?? "");
-  }, []);
+    const aborter = new AbortController();
+    loadSavedOrders(aborter.signal).then(loaded => {
+      if (aborter.signal.aborted) return;
+      setOrders(loaded);
+      setNow(Date.now());
+      const tracked = loaded.find(order => order.id === reference);
+      if (tracked) {
+        setTrackedId(tracked.id);
+        setView(orderView(tracked));
+      } else {
+        if (reference) setError(orderNotFound);
+        if (loaded.length && loaded.every(isPastOrder)) setView("history");
+      }
+    }).catch(exception => {
+      if (!aborter.signal.aborted) setError(message(exception));
+    }).finally(() => {
+      if (!aborter.signal.aborted) setBusy(false);
+    });
+    return () => aborter.abort();
+  }, [reference]);
 
-  async function lookup(value: string, showTrackedOrder = false) {
-    const orderNumber = value.trim().toLowerCase();
-    if (!orderNumber) throw new Error("Enter the order number from checkout.");
-    const tokens = savedLocks().filter(entry => entry.orderId).map(entry => entry.token);
-    if (!tokens.length) throw new Error("Open this tracker in the browser you used at checkout. No saved checkouts were found here.");
-    const result = await action<{ orders: LockerOrder[] }>("locker", { orderNumber, tokens });
-    const tracked = result.orders.find(order => order.id === orderNumber);
-    if (!tracked) throw new Error("Could not find that order number.");
-    setTrackedId(tracked.id);
-    setOrders([tracked, ...result.orders.filter(order => order.id !== tracked.id)]);
+  async function refreshOrders() {
+    const loaded = await loadSavedOrders();
+    setOrders(loaded);
     setNow(Date.now());
-    if (showTrackedOrder) setView(isPastOrder(tracked) ? "history" : openHoldBox(tracked) ? "hold" : "orders");
+    return loaded;
   }
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
+  async function updateOrders(orderNumber?: string) {
     setBusy(true); setError(""); setSuccess("");
-    try { await lookup(number, true); }
-    catch (exception) { setError(message(exception)); }
+    try {
+      const loaded = await refreshOrders();
+      const target = orderNumber?.trim().toLowerCase() ?? (trackedId || reference);
+      const tracked = loaded.find(order => order.id === target);
+      if (tracked) {
+        const previous = orders?.find(order => order.id === tracked.id);
+        setTrackedId(tracked.id);
+        if (orderNumber !== undefined || !previous || view === orderView(previous)) setView(orderView(tracked));
+      } else if (orderNumber !== undefined || (!orders && reference)) {
+        throw new Error(orderNotFound);
+      } else if (!orders && loaded.length && loaded.every(isPastOrder)) setView("history");
+    } catch (exception) { setError(message(exception)); }
     finally { setBusy(false); }
   }
 
   function chooseParcel(order: LockerOrder) {
     const compatible = orders?.filter(entry => openHoldBox(entry) && !entry.dispatchRequestedAt &&
-      entry.sellerId === order.sellerId && entry.shippingAddress === order.shippingAddress) ?? [];
+      entry.parcelKey === order.parcelKey) ?? [];
     setDispatchError("");
     setParcel({ orders: compatible, selected: [order.id] });
   }
@@ -107,7 +140,7 @@ export function Locker() {
       await action("dispatch", { tokens });
       setParcel(null);
       setSuccess("Dispatch requested. Message the seller to arrange combined shipping.");
-      try { await lookup(trackedId); }
+      try { await refreshOrders(); }
       catch (exception) { setError(`Refresh your orders to see the new parcel. ${message(exception)}`); }
     } catch (exception) { setDispatchError(message(exception)); }
     finally { setDispatching(false); }
@@ -125,7 +158,7 @@ export function Locker() {
       setReportOrder(null);
       setView("orders");
       setSuccess("Transfer reported. The seller can review it in LockDulu.");
-      try { await lookup(trackedId); }
+      try { await refreshOrders(); }
       catch (exception) { setError(`Refresh your orders to see the transfer status. ${message(exception)}`); }
     } catch (exception) { setReportError(message(exception)); }
     finally { setReporting(false); }
@@ -146,7 +179,7 @@ export function Locker() {
       if (type === "CONFIRM_REFUND") setView("history");
       setSuccess(type === "CONFIRM_REFUND" ? "Refund receipt confirmed." : type === "REQUEST_HELP" ? "Help requested. You can follow the case here."
         : type === "DISPUTE_REFUND" ? "The seller can see that you haven’t received the full refund." : "Payment reference updated for the seller.");
-      try { await lookup(trackedId); }
+      try { await refreshOrders(); }
       catch (exception) { setError(`Refresh your orders to see the update. ${message(exception)}`); }
     } catch (exception) { setReportError(message(exception)); }
     finally { setReporting(false); }
@@ -154,6 +187,10 @@ export function Locker() {
 
   const visible = orders?.filter(order => view === "hold" ? openHoldBox(order)
     : view === "history" ? isPastOrder(order) : !isPastOrder(order));
+  const tracked = orders?.find(order => order.id === trackedId);
+  const displayed = visible && tracked && visible.includes(tracked)
+    ? [tracked, ...visible.filter(order => order !== tracked)] : visible;
+  const controlsDisabled = busy || dispatching || reporting;
   const parcelPieces = new Map<string, string[]>();
   for (const order of orders ?? []) {
     if (order.dispatchGroupId) {
@@ -166,24 +203,36 @@ export function Locker() {
     <main className="wrap secondary-page">
       <div className="section-intro"><span className="eyebrow"><Box size={17} strokeWidth={1.5} /> Buyer tools</span><h1>My orders</h1>
         <p>Track payments and shipments, or request dispatch for your Hold Box pieces.</p></div>
-      <form className="surface stack lookup" onSubmit={submit}>
-        <label>Order number<input required type="text" autoComplete="off" autoCapitalize="none" spellCheck={false}
-          value={number} maxLength={100} disabled={busy || dispatching || reporting} placeholder="Paste your order number"
-          onChange={event => { setNumber(event.target.value); setOrders(null); setError(""); setSuccess(""); }} /></label>
-        <p className="muted">Use the order number from checkout in the browser where you placed the order.</p>
-        <button className="button primary" disabled={busy || dispatching || reporting}><Search size={18} strokeWidth={1.5} />{busy ? "Looking up order…" : orders ? "Refresh orders" : "Find order"}</button>
-      </form>
+      <div className="locker-tools">
+        <button className="button" type="button" disabled={controlsDisabled} onClick={() => void updateOrders()}>
+          <RefreshCw size={17} aria-hidden="true" />{busy ? "Loading orders…" : "Refresh orders"}
+        </button>
+        {!!orders?.length && <details className="locker-search surface">
+          <summary>Find by order number</summary>
+          <form className="stack" onSubmit={event => { event.preventDefault(); void updateOrders(number); }}>
+            <label>Order number<input required autoComplete="off" autoCapitalize="none" spellCheck={false}
+              value={number} maxLength={100} disabled={controlsDisabled} onChange={event => setNumber(event.target.value)} /></label>
+            <button className="button" disabled={controlsDisabled}><Search size={17} aria-hidden="true" /> Find order</button>
+          </form>
+        </details>}
+      </div>
+      {busy && <p className="muted" role="status">Checking for orders saved in this browser…</p>}
       {error && <Notice>{error}</Notice>}
       {success && <Notice success>{success}</Notice>}
-      {visible && <div className="stack locker-results">
+      {orders?.length === 0 && <div className="surface empty">
+        <Box size={24} aria-hidden="true" /><h2>No saved orders</h2>
+        <p>Open My orders in the browser you used at checkout to see your orders.</p>
+        <Link className="button" href="/">Browse shops</Link>
+      </div>}
+      {!!orders?.length && displayed && <div className="stack locker-results">
         <nav className="dashboard-tabs" aria-label="Order sections">
           {([["orders", "Active orders"], ["hold", "Hold Box"], ["history", "History"]] as const).map(([key, label]) =>
             <button type="button" key={key} className={view === key ? "selected" : ""} aria-pressed={view === key} onClick={() => setView(key)}>{label}</button>)}
         </nav>
-        {visible.length === 0 && <div className="surface empty"><Box size={24} strokeWidth={1.5} />
+        {displayed.length === 0 && <div className="surface empty"><Box size={24} strokeWidth={1.5} />
           <h2>{view === "hold" ? "No open Hold Box pieces" : view === "history" ? "No past orders" : "No active orders"}</h2>
           <p>Check another order section.</p></div>}
-        {visible.map(order => {
+        {displayed.map(order => {
           const pending = order.status !== "VERIFIED_PAID" || order.shipmentUnconfirmed;
           const hold = openHoldBox(order);
           return <article className="surface locker-order" key={order.id}>

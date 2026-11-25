@@ -6,7 +6,7 @@ import { HttpError, limitBody, requireOrigin, respond } from "@/lib/http";
 import { lockItem, orderState, preparePayment, reportTransfer, reviewOrder, updateBuyerTransfer, updateSellerTransfer } from "@/lib/inventory";
 import { checkPassword, passwordHash } from "@/lib/password";
 import { currentSeller, sellerSession, sessionCookie, sessionSeconds } from "@/lib/security";
-import { createDrop, dashboardData, deleteGarment, editGarment, listGarment, lockerLookup, markShipped, queueShipment, reconcileShipment, requestDispatch, sellerHistory, setGarmentHidden, updateSettings, updateShopProfile } from "@/lib/seller";
+import { createDrop, dashboardData, deleteGarment, editGarment, listGarment, lockerLookup, lockerSavedOrders, markShipped, queueShipment, reconcileShipment, requestDispatch, sellerHistory, setGarmentHidden, updateSettings, updateShopProfile } from "@/lib/seller";
 import { buyerTransferUpdate, delivery, id, listing, listingEdit, newDrop, orderNumber, phone, receiptRejection, sellerTransferUpdate, settings, shopProfile, token, transferReference, transferVersion } from "@/lib/validation";
 import { existingShop } from "@/lib/shop-status";
 import { storage } from "@/lib/storage";
@@ -53,6 +53,7 @@ export async function POST(request: Request) {
       case "reportTransfer": return reportTransfer(id.parse(body.id), token.parse(body.token), transferReference.parse(body.reference));
       case "buyerTransferUpdate": return updateBuyerTransfer(id.parse(body.id), token.parse(body.token), transferVersion.parse(body.version), buyerTransferUpdate.parse(body.update));
       case "locker": return { orders: await lockerLookup(orderNumber.parse(body.orderNumber), z.array(token).max(100).parse(body.tokens)) };
+      case "lockerSaved": return { orders: await lockerSavedOrders(z.array(token).min(1).max(100).parse(body.tokens)) };
       case "dispatch": return requestDispatch(z.array(token).min(1).max(100).parse(body.tokens));
       case "register": {
         limitAttempts("register", "Too many registration attempts. Try again in a minute.");

@@ -1,11 +1,20 @@
 import Link from "next/link";
 import { ArrowUpRight, Search, Store } from "lucide-react";
-import { Footer, Header } from "@/components/common";
+import { Footer, GarmentPhoto, Header } from "@/components/common";
+import { malaysiaDropDate } from "@/lib/catalog";
 import { readDirectoryPage } from "./shop-directory";
 
 export const dynamic = "force-dynamic";
 
 type SearchParams = Record<string, string | string[] | undefined>;
+const shopStatusLabels = {
+  available: "Available now",
+  upcoming: "Next drop",
+  browse: "Payments being set up",
+  empty: "No listings yet",
+  unavailable: "No pieces available right now",
+  "sold-out": "Sold out",
+};
 
 export default async function Home({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const { q, page: pageParam } = await searchParams;
@@ -37,10 +46,16 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
       {shops.length ? <ul className="shop-grid" aria-label="Shops">
         {shops.map(shop => <li key={shop.storeSlug}>
           <Link className="shop-card surface" href={`/${shop.storeSlug}`}>
-            <span className="store-emblem"><Store size={23} strokeWidth={1.5} aria-hidden="true" /></span>
+            {shop.previewImage
+              ? <GarmentPhoto className="shop-preview" src={shop.previewImage} alt="" loading="lazy" />
+              : <span className="shop-preview shop-preview-empty"><Store size={23} strokeWidth={1.5} aria-hidden="true" /></span>}
             <div className="shop-card-info">
               <h2>{shop.storeName}</h2>
               <p className="muted store-handle">@{shop.storeSlug}</p>
+              <p className={`shop-stock shop-stock-${shop.status}`}>{shopStatusLabels[shop.status]}</p>
+              {shop.status === "upcoming" && shop.nextDrop && <p className="shop-drop muted">
+                {shop.nextDrop.title} · <time dateTime={shop.nextDrop.scheduledAt}>{malaysiaDropDate.format(new Date(shop.nextDrop.scheduledAt))} MYT</time>
+              </p>}
               {shop.bio && <p className="shop-bio muted">{shop.bio}</p>}
             </div>
             <ArrowUpRight size={20} strokeWidth={1.5} aria-hidden="true" />

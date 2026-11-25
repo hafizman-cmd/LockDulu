@@ -25,7 +25,7 @@ export function ShareStorefront({ storeSlug, publicOrigin }: { storeSlug: string
   }
 
   return <section className="surface share-storefront" aria-labelledby="share-storefront-heading">
-    <h2 id="share-storefront-heading">Share your storefront</h2>
+    <h2 id="share-storefront-heading" tabIndex={-1}>Share your storefront</h2>
     <p className="muted">{local ? "This is a local test link. Use your live site address to share with customers." : "Paste this link into your social bio or send it to customers."}</p>
     <div className="share-storefront-fields">
       <input ref={input} type="url" value={link} readOnly aria-label="Storefront link" />

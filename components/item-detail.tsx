@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   ChevronLeft, ChevronRight, Clock3, Copy, Download, ImagePlus, LockKeyhole, MessageCircle, Package, Ruler, ShieldCheck, Truck,
 } from "lucide-react";
-import { buyerStatus, grades, money, rejectionMessage, timer, whatsapp, type GarmentView, type Quote } from "@/lib/catalog";
+import { buyerStatus, grades, malaysiaTime, money, rejectionMessage, timer, whatsapp, type GarmentView, type Quote } from "@/lib/catalog";
 import type { readItem } from "@/lib/inventory";
 import { action, forgetLock, json, message, randomToken, readLocal, removeLocal, RequestError, savedLocks, saveLock, upload, useClock, usePolling, writeLocal, type SavedLock } from "./client";
 import { AvailabilityNotice, Footer, GarmentPhoto, Header, Notice, OrderReference, Sheet, Stage } from "./common";
@@ -416,9 +416,9 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
         {data.store.whatsappNumber && <a className="button" href={sellerLink} target="_blank" rel="noreferrer"><MessageCircle size={18} strokeWidth={1.5} /> Message seller on WhatsApp</a>}
         <Link className={"button" + (done.status === "REJECTED" ? " primary" : "")} href={trackerHref}>Open My orders</Link>
       </div> : quote && <>
-        <div className="checkout-status"><span>Step {step} of 2 · {step === 1 ? "Delivery" : "DuitNow payment"}</span><strong className="timer"><Clock3 size={17} strokeWidth={1.5} />{timer(remaining)}</strong></div>
-        <OrderReference key={quote.orderId} number={quote.orderId} showHint />
+        <div className="checkout-status"><span role="status">Step {step} of 2 · {step === 1 ? "Delivery" : "DuitNow payment"}</span><strong className="timer"><Clock3 size={17} aria-hidden="true" />{timer(remaining)} left</strong></div>
         {step === 1 ? <form className="stack" onSubmit={continueToPayment}>
+          <p className="muted">Your reservation covers delivery details, the bank transfer, and receipt upload.</p>
           <fieldset className="stack" disabled={busy}>
           <label>Buyer name<input required autoComplete="name" maxLength={100} value={delivery.buyerName} onChange={event => setDelivery({ ...delivery, buyerName: event.target.value })} /></label>
           <label>WhatsApp phone<input required type="tel" autoComplete="tel" maxLength={30} placeholder="012 345 6789" value={delivery.buyerPhone} onChange={event => setDelivery({ ...delivery, buyerPhone: event.target.value })} /></label>
@@ -435,26 +435,48 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
           {error && <Notice>{error}</Notice>}
           <button className="button primary" disabled={busy}>{busy ? "Checking reservation…" : `Continue to payment · ${money(exact!)}`}</button>
         </form> : <form className="stack" onSubmit={sendReceipt}>
-          <p>Transfer the exact amount and submit your screenshot before the timer ends. On this phone, download the QR and open it from your banking app. If you already paid, upload the screenshot for this transfer.</p>
-          <div className={`qr-card surface${expandedQr ? " qr-expanded" : ""}`}>
-            {qrFailed ? <button type="button" className="button" onClick={() => { setQrFailed(false); setQrRetry(current => current + 1); }}>Retry QR image</button> :
-              <img id="seller-payment-qr" src={qrRetry ? `${quote.qrCodeUrl}?retry=${qrRetry}` : quote.qrCodeUrl} alt="Seller DuitNow QR" onError={() => setQrFailed(true)} />}
-            <div><strong>{quote.qrAccountName}</strong><p>{quote.qrBankLabel}</p><b>{money(preparedTotal!)}</b></div>
-          </div>
-          {qrFailed && <Notice>The QR image could not load. Retry it before transferring.</Notice>}
-          {quote.qrCodeUrl === "/sample/duitnow.svg" && <p className="muted">Sample QR for checkout testing. Replace it with your seller’s DuitNow QR before accepting live payments.</p>}
-          <div className="button-row">{!qrFailed && <><a href={quote.qrCodeUrl} download className="button"><Download size={17} strokeWidth={1.5} /> Download QR</a>
-            <button type="button" className="button" aria-expanded={expandedQr} aria-controls="seller-payment-qr" onClick={() => setExpandedQr(current => !current)}>{expandedQr ? "Smaller QR" : "Enlarge QR"}</button></>}
-            <button type="button" className="button" onClick={async () => {
-              try { await navigator.clipboard.writeText(preparedTotal!); setCopied(true); setError(""); }
-              catch { setError(`Copy the amount manually: ${preparedTotal}`); }
-            }}><Copy size={17} strokeWidth={1.5} /> {copied ? "Amount copied" : "Copy Amount"}</button></div>
-          <label className="file-field"><ImagePlus size={22} strokeWidth={1.5} /><span>{file?.name ?? "Payment Receipt Screenshot"}<small>Large images are resized before upload. Make sure the payment details are readable.</small></span><input required type="file" accept="image/jpeg,image/png,image/webp,image/heif,image/heic,image/avif" aria-label="Payment receipt screenshot" disabled={busy || receiptUnconfirmed} onChange={event => setFile(event.target.files?.[0] ?? null)} /></label>
-          {error && <Notice>{error}</Notice>}
-          {error && data.store.whatsappNumber && <a className="text-button" href={sellerLink} target="_blank" rel="noreferrer">Already paid? Contact the seller</a>}
-          {receiptUnconfirmed ? <button className="button primary" type="button" disabled={busy} onClick={retryReceiptCheck}>{busy ? "Checking receipt…" : "Check receipt status"}</button> :
-            <button className="button primary" disabled={busy || !file || expired}>{busy ? "Submitting receipt…" : "Submit payment receipt"}</button>}
-          <button className="text-button" type="button" disabled={busy || receiptUnconfirmed} onClick={() => { setStep(1); setError(""); }}>Edit delivery before paying</button>
+          <section className="checkout-payment stack" aria-labelledby="payment-heading">
+            <h3 id="payment-heading">Pay with DuitNow QR</h3>
+            <div className={`qr-card surface${expandedQr ? " qr-expanded" : ""}`}>
+              <div className="payment-payee">
+                <b>{money(preparedTotal!)}</b><strong>{quote.qrAccountName}</strong><p className="muted">{quote.qrBankLabel}</p>
+              </div>
+              {qrFailed ? <button type="button" className="button" onClick={() => { setQrFailed(false); setQrRetry(current => current + 1); }}>Retry QR image</button> :
+                <img id="seller-payment-qr" src={qrRetry ? `${quote.qrCodeUrl}?retry=${qrRetry}` : quote.qrCodeUrl} alt="Seller DuitNow QR" onError={() => setQrFailed(true)} />}
+            </div>
+            {receiptUnconfirmed ? <p>Check whether your receipt arrived before trying again.</p> :
+              <p>Transfer this exact amount to the payee shown. Return here and submit your screenshot by <strong><time dateTime={quote.lockedUntil}>{malaysiaTime.format(quoteUntil)} Malaysia time</time></strong> to keep your reservation.</p>}
+            {qrFailed && <Notice>The QR image could not load. Retry it before transferring.</Notice>}
+            {quote.qrCodeUrl === "/sample/duitnow.svg" && <p className="muted">Sample QR for checkout testing. It cannot receive a payment.</p>}
+            {!qrFailed && !receiptUnconfirmed && <div className="stack">
+              <p className="muted">Paying on this phone? Download the QR, then choose it from your banking app’s QR gallery.</p>
+              <div className="button-row">
+                <a href={quote.qrCodeUrl} download className="button"><Download size={17} aria-hidden="true" /> Download DuitNow QR</a>
+                <button type="button" className="button" aria-expanded={expandedQr} aria-controls="seller-payment-qr" onClick={() => setExpandedQr(current => !current)}>{expandedQr ? "Smaller QR" : "Enlarge QR"}</button>
+                <button type="button" className="button" onClick={async () => {
+                  try { await navigator.clipboard.writeText(preparedTotal!); setCopied(true); setError(""); }
+                  catch { setError(`Copy the amount manually: ${preparedTotal}`); }
+                }}><Copy size={17} aria-hidden="true" /> {copied ? "Amount copied" : "Copy amount"}</button>
+              </div>
+            </div>}
+            <div className="button-row">
+              <button className="text-button" type="button" disabled={busy || receiptUnconfirmed} onClick={() => { setStep(1); setError(""); }}>Edit delivery before paying</button>
+              <button className="text-button" type="button" onClick={() => document.getElementById("checkout-receipt-heading")?.focus()}>
+                {receiptUnconfirmed ? "Go to receipt status" : "Already paid? Go to upload"}
+              </button>
+            </div>
+          </section>
+          <section className="checkout-receipt stack" aria-labelledby="checkout-receipt-heading">
+            <h3 id="checkout-receipt-heading" tabIndex={-1}>{receiptUnconfirmed ? "Check your receipt status" : "Upload your payment receipt"}</h3>
+            <div hidden={receiptUnconfirmed}>
+              <label className="file-field"><ImagePlus size={22} aria-hidden="true" /><span>{file?.name ?? "Choose payment screenshot"}<small>Make sure the amount and bank reference are readable.</small></span><input required type="file" accept="image/jpeg,image/png,image/webp,image/heif,image/heic,image/avif" aria-label="Payment receipt screenshot" disabled={busy || receiptUnconfirmed} onChange={event => setFile(event.target.files?.[0] ?? null)} /></label>
+            </div>
+            {error && <Notice>{error}</Notice>}
+            {error && data.store.whatsappNumber && <a className="text-button" href={sellerLink} target="_blank" rel="noreferrer">Already paid? Contact the seller</a>}
+            {receiptUnconfirmed ? <button className="button primary" type="button" disabled={busy} onClick={retryReceiptCheck}>{busy ? "Checking receipt…" : "Check receipt status"}</button> :
+              <button className="button primary" disabled={busy || !file || expired}>{busy ? "Submitting receipt…" : "Submit payment receipt"}</button>}
+          </section>
+          <OrderReference key={quote.orderId} number={quote.orderId} />
         </form>}
       </>}
     </Sheet>}

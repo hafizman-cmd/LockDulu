@@ -33,6 +33,9 @@ export type Quote = {
   holdBoxDays: number; qrCodeUrl: string; qrAccountName: string; qrBankLabel: string;
 };
 export function money(amount: string | number) { return `RM${Number(amount).toFixed(2)}`; }
+const malaysiaTimeZone = "Asia/Kuala_Lumpur";
+export const malaysiaTime = new Intl.DateTimeFormat("en-MY", { hour: "numeric", minute: "2-digit", second: "2-digit", timeZone: malaysiaTimeZone });
+export const malaysiaDropDate = new Intl.DateTimeFormat("en-MY", { dateStyle: "medium", timeStyle: "short", timeZone: malaysiaTimeZone });
 export const receiptRejectionLabels = {
   UNREADABLE_RECEIPT: "Receipt image could not be read",
   TRANSFER_NOT_FOUND: "Transfer could not be matched",

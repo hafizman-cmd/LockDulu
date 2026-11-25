@@ -22,6 +22,7 @@ const tabs = [
   { key: "settings", label: "Settings", icon: Settings },
 ] as const;
 const receiptReviewHours = 24;
+type SellerTab = typeof tabs[number]["key"];
 
 export function SellerLogin() {
   const router = useRouter();
@@ -93,7 +94,9 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
   }, [router]);
   const [data, setData] = usePolling(initial, get, 5000);
   const now = useClock(data.serverTime);
-  const [selectedTab, setTab] = useState<typeof tabs[number]["key"]>("receipts");
+  const [selectedTab, setTab] = useState<SellerTab>("receipts");
+  const [sectionTarget, setSectionTarget] = useState<string | null>(null);
+  const [showSetup] = useState(() => !initial.seller.paymentReady || (initial.seller.nextItemNumber === 1 && !initial.items.length));
   const [filter, setFilter] = useState("all");
   const [visibility, setVisibility] = useState("all");
   const [query, setQuery] = useState("");
@@ -116,12 +119,18 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
   }, [get, setData]);
   const { seller, items } = data;
   const held = seller.status === "HELD";
+  const hasListed = seller.nextItemNumber > 1 || items.length > 0;
   const tab = held && selectedTab === "settings" ? "inventory" : selectedTab;
   useEffect(() => {
     if (!held) return;
     setListing(null);
     setDeleting(null);
   }, [held]);
+  useEffect(() => {
+    if (!sectionTarget) return;
+    document.getElementById(sectionTarget)?.focus();
+    setSectionTarget(null);
+  }, [sectionTarget]);
   const pending = data.orders.filter(order => order.paymentStatus === "PENDING_VERIFICATION");
   const overdueReceipts = pending.filter(order => Date.parse(order.receiptSubmittedAt) <= now - receiptReviewHours * 3_600_000);
   const verified = data.orders.filter(order => order.paymentStatus === "VERIFIED_PAID");
@@ -135,9 +144,30 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
       groups.set(order.dispatchGroupId, [...(groups.get(order.dispatchGroupId) ?? []), order]);
     }
   }
+  const reportsNeedAction: DashboardData["transferReports"] = [];
+  const reportsAwaitingBuyer: DashboardData["transferReports"] = [];
+  for (const report of data.transferReports) {
+    const needsAction = !report.transferResolution || report.refundDisputed ||
+      (report.transferResolution === "REFUNDED" && !report.refundReference);
+    (needsAction ? reportsNeedAction : reportsAwaitingBuyer).push(report);
+  }
+  const transferReports = [...reportsNeedAction, ...reportsAwaitingBuyer];
+  const queues = [
+    { tab: "receipts", target: "seller-receipts", label: "Receipts to review", count: pending.length, icon: ReceiptText },
+    { tab: "shipping", target: "seller-shipping", label: "Ship Now orders to pack", count: readyToShip.length, icon: PackageCheck },
+    { tab: "receipts", target: "seller-transfers", label: "Transfer reports to follow up", count: reportsNeedAction.length, icon: ShieldCheck },
+    { tab: "hold", target: "seller-hold", label: "Hold Box parcels to pack", count: groups.size, icon: Box },
+  ] as const;
   const visible = items.filter(item => (filter === "all" || item.status === filter) &&
     (visibility === "all" || item.hidden === (visibility === "hidden")) &&
     `${item.code} ${item.title} ${item.brand}`.toLowerCase().includes(query.trim().toLowerCase()));
+
+  function openSection(nextTab: SellerTab, target?: string) {
+    setTab(nextTab);
+    setError("");
+    setSuccess("");
+    if (target) setSectionTarget(target);
+  }
 
   async function changeVisibility(item: DashboardData["items"][number]) {
     const hidden = !item.hidden;
@@ -203,11 +233,32 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
           }}><LogOut size={18} strokeWidth={1.5} /></button>
         </div>
       </div>
-      {held ? <Notice><span><strong>Your shop is on hold.</strong> Your storefront is hidden. You can still review receipts and fulfill existing orders.</span></Notice> :
-        <ShareStorefront key={seller.storeSlug} storeSlug={seller.storeSlug} publicOrigin={publicOrigin} />}
+      {held ? <Notice><span><strong>Your shop is on hold.</strong> Your storefront is hidden. You can still review receipts and fulfill existing orders.</span></Notice> : <>
+        {(showSetup || !seller.paymentReady) && <section className="seller-setup surface stack" aria-labelledby="seller-setup-heading">
+          <h2 id="seller-setup-heading">Get your shop ready</h2>
+          <ol>
+            <li>{seller.paymentReady ? <span><Check size={17} aria-hidden="true" /> DuitNow payments set up</span> :
+              <button className="button primary" type="button" onClick={() => openSection("settings", "seller-payment-settings")}>Set up DuitNow</button>}</li>
+            <li>{hasListed ? <span><Check size={17} aria-hidden="true" /> First piece listed</span> :
+              <button className="button" type="button" onClick={() => setListing(true)}>List your first piece</button>}</li>
+            <li>{seller.paymentReady && hasListed ? <a className="button" href="#share-storefront-heading">Share your shop link</a> :
+              <span className="muted">Share your shop when payments and your first piece are ready</span>}</li>
+          </ol>
+        </section>}
+        <ShareStorefront key={seller.storeSlug} storeSlug={seller.storeSlug} publicOrigin={publicOrigin} />
+      </>}
+      <section className="seller-work" aria-labelledby="seller-work-heading">
+        <h2 id="seller-work-heading">Needs attention</h2>
+        <div className="seller-queues">
+          {queues.map(({ tab: nextTab, target, label, count, icon: Icon }) => <button key={target} className="surface seller-queue" type="button"
+            onClick={() => openSection(nextTab, target)}>
+            <Icon size={19} aria-hidden="true" /><strong>{count}</strong><span>{label}</span>
+          </button>)}
+        </div>
+      </section>
       <nav className="dashboard-tabs" aria-label="Seller sections">
         {tabs.filter(({ key }) => !held || key !== "settings").map(({ key, label, icon: Icon }) => <button key={key} aria-current={tab === key ? "page" : undefined} className={tab === key ? "selected" : ""}
-          onClick={() => { setTab(key); setError(""); setSuccess(""); }}><Icon size={17} strokeWidth={1.5} /> {label}
+          onClick={() => openSection(key)}><Icon size={17} strokeWidth={1.5} /> {label}
           {key === "receipts" && pending.length + data.transferReports.length > 0 && <span>{pending.length + data.transferReports.length}</span>}
           {key === "shipping" && immediate.length > 0 && <span>{immediate.length}</span>}
         </button>)}
@@ -217,10 +268,10 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
       {overdueReceipts.length > 0 && <Notice>
         {overdueReceipts.length === 1 ? "One receipt has" : `${overdueReceipts.length} receipts have`} been waiting at least {receiptReviewHours} hours.
         {" "}{tab === "receipts" ? "Check your bank and contact the buyer if you cannot match the transfer."
-          : <button className="text-button" onClick={() => setTab("receipts")}>Review receipts</button>}
+          : <button className="text-button" onClick={() => openSection("receipts", "seller-receipts")}>Review receipts</button>}
       </Notice>}
       {tab === "receipts" && <section className="dash-section stack">
-        <div className="section-heading"><div><h2>Receipt verification</h2><p className="muted">Review within {receiptReviewHours} hours. Check each screenshot against your bank or eWallet before confirming.</p></div><span className="piece-count">{pending.length} pending</span></div>
+        <div className="section-heading"><div><h2 id="seller-receipts" tabIndex={-1}>Receipt verification</h2><p className="muted">Review within {receiptReviewHours} hours. Check each screenshot against your bank or eWallet before confirming.</p></div><span className="piece-count">{pending.length} pending</span></div>
         {pending.length === 0 && <div className="surface empty"><ReceiptText size={31} strokeWidth={1.5} /><h3>No receipts to review</h3><p>Buyer payment screenshots appear here as they arrive.</p></div>}
         {pending.map(order => <article key={order.id} className="surface receipt-order">
           <div className="order-body">
@@ -239,9 +290,10 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
             <button className="button primary" onClick={() => openDecision({ type: "review", orderId: order.id, paid: true, code: order.garment.code })}><Check size={18} strokeWidth={1.5} /> Confirm Paid</button>
           </div>
         </article>)}
-        {data.transferReports.length > 0 && <section className="stack">
-          <div className="section-heading"><div><h2>Reported bank transfers</h2><p className="muted">Check your bank or eWallet and contact the buyer if you need a clearer receipt.</p></div></div>
-          {data.transferReports.map(report => <article key={report.id} className="surface receipt-order stack">
+        <section className="stack">
+          <div className="section-heading"><div><h2 id="seller-transfers" tabIndex={-1}>Reported bank transfers</h2><p className="muted">Check your bank or eWallet and contact the buyer if you need a clearer receipt.</p></div></div>
+          {!transferReports.length && <p className="muted">No open transfer reports.</p>}
+          {transferReports.map(report => <article key={report.id} className="surface receipt-order stack">
             <h3>{report.title ?? report.code}</h3>
             <p>Order {report.id} · {money(report.total)}</p>
             <p>Bank reference <strong>{report.reference}</strong></p>
@@ -257,10 +309,10 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
                 <button type="button" className="button primary" onClick={() => openDecision({ type: "transfer", report })}>{report.transferResolution ? "Update report" : "Record outcome"}</button>}
             </div>
           </article>)}
-        </section>}
+        </section>
       </section>}
       {tab === "shipping" && <section className="dash-section stack">
-        <div className="section-heading"><div><h2>Ship Now fulfillment</h2><p className="muted">Pack and dispatch orders with verified payment.</p></div>
+        <div className="section-heading"><div><h2 id="seller-shipping" tabIndex={-1}>Ship Now fulfillment</h2><p className="muted">Pack and dispatch orders with verified payment.</p></div>
           <span className="piece-count">{readyToShip.length} to ship</span></div>
         {!immediate.length && <div className="surface empty"><PackageCheck size={30} strokeWidth={1.5} /><h3>No orders to ship</h3><p>Verified Ship Now orders appear here.</p></div>}
         {[readyToShip, unconfirmed].map((orders, index) => orders.length > 0 && <section className="stack" key={index} aria-label={index ? "Earlier orders" : "Ready to ship"}>
@@ -312,7 +364,7 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
         })}{visible.length === 0 && <p className="empty">No pieces match this filter.</p>}</div>
       </section>}
       {tab === "hold" && <section className="dash-section stack">
-        <div className="section-heading"><div><h2>Hold Box fulfillment</h2><p className="muted">Pack the pieces in each buyer-confirmed parcel.</p></div><span className="piece-count">{groups.size} to pack</span></div>
+        <div className="section-heading"><div><h2 id="seller-hold" tabIndex={-1}>Hold Box fulfillment</h2><p className="muted">Pack the pieces in each buyer-confirmed parcel.</p></div><span className="piece-count">{groups.size} to pack</span></div>
         {!groups.size && <div className="surface empty"><Box size={30} strokeWidth={1.5} /><h3>No parcels to pack</h3><p>Parcels appear here when buyers request dispatch.</p></div>}
         {[...groups.entries()].map(([groupId, orders]) => {
           const first = orders[0];
@@ -345,7 +397,7 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
         <ShopProfile seller={seller} onSaved={async () => { setSuccess("Shop profile saved."); await refresh(); }} />
         <div className="section-heading"><div><h2>Drops</h2><p className="muted">Create a drop and select it when you list a garment.</p></div></div>
         <DropSettings drops={data.drops} onCreated={async () => { setSuccess("Drop created. Select it when listing a garment."); await refresh(); }} />
-        <div className="section-heading"><div><h2><QrCode size={23} strokeWidth={1.5} /> DuitNow and delivery</h2><p className="muted">Changes apply to new checkouts.</p></div></div>
+        <div className="section-heading"><div><h2 id="seller-payment-settings" tabIndex={-1}><QrCode size={23} strokeWidth={1.5} /> DuitNow and delivery</h2><p className="muted">Changes apply to new checkouts.</p></div></div>
         <StoreSettings seller={seller} onSaved={async () => { setSuccess("Store settings saved."); await refresh(); }} />
       </section>}
       {tab === "history" && <SellerHistory onReceipt={setReceiptOpen} />}

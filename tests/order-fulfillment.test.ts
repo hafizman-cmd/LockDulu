@@ -9,7 +9,7 @@ import { createClient } from "@libsql/client";
 import { adminTransferCases, moderateShop } from "../lib/admin.ts";
 import { db } from "../lib/db.ts";
 import { lockItem, orderState, preparePayment, readItem, readStore, reportTransfer, reviewOrder, submitReceipt, updateBuyerTransfer, updateSellerTransfer } from "../lib/inventory.ts";
-import { dashboardData, deleteGarment, editGarment, listGarment, lockerLookup, markShipped, queueShipment, reconcileShipment, requestDispatch, sellerHistory, setGarmentHidden, updateShopProfile } from "../lib/seller.ts";
+import { dashboardData, deleteGarment, editGarment, listGarment, lockerLookup, lockerSavedOrders, markShipped, queueShipment, reconcileShipment, requestDispatch, sellerHistory, setGarmentHidden, updateShopProfile } from "../lib/seller.ts";
 import { whatsapp } from "../lib/catalog.ts";
 
 const buyerPhone = "60123456789";
@@ -164,6 +164,13 @@ test("paid orders stay actionable and Hold Box parcels contain only the selected
     const differentAddress = await paidHoldBox("B-006", "6".repeat(64), "22 Jalan Ampang, Kuala Lumpur");
     const differentShop = await paidHoldBox("B-001", "7".repeat(64), address, other.id);
     const differentBuyer = await paidHoldBox("B-007", "8".repeat(64), address, shop.id, "60199999999");
+    const saved = await lockerSavedOrders([first.token, second.token, differentAddress.token, differentShop.token, differentBuyer.token, "0".repeat(64)]);
+    const parcelKey = (id: string) => saved.find(order => order.id === id)?.parcelKey;
+    assert.deepEqual(new Set(saved.map(order => order.id)), new Set([first.id, second.id, differentAddress.id, differentShop.id, differentBuyer.id]));
+    assert.equal(parcelKey(first.id), parcelKey(second.id));
+    assert.notEqual(parcelKey(first.id), parcelKey(differentAddress.id));
+    assert.notEqual(parcelKey(first.id), parcelKey(differentShop.id));
+    assert.notEqual(parcelKey(first.id), parcelKey(differentBuyer.id));
     await db().order.update({ where: { id: first.id }, data: { verifiedAt: new Date(0) } });
     await assert.rejects(requestDispatch([first.token, differentAddress.token]), { status: 409 });
     await assert.rejects(requestDispatch([first.token, differentShop.token]), { status: 409 });

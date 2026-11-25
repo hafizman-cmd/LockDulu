@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Clock3, Globe2, Grid2x2, ScanLine, SlidersHorizontal, Tag } from "lucide-react";
 import type { readStore } from "@/lib/inventory";
-import { categories, grades, measurements, money, timer } from "@/lib/catalog";
+import { categories, grades, malaysiaDropDate, measurements, money, timer } from "@/lib/catalog";
 import { ActiveLock, AvailabilityNotice, Footer, GarmentPhoto, Header, Sheet, Stage } from "./common";
 import { json, readLocal, RequestError, useClock, usePolling, writeLocal } from "./client";
 
@@ -44,6 +44,9 @@ export function Storefront({ initial }: { initial: StoreData }) {
   const drop = data.drops.find(entry => entry.id === selection);
   const filter = drop || selection === "available" || selection === "no-drop" ? selection : "all";
   const upcoming = drop?.status === "UPCOMING";
+  const liveDrop = data.drops.findLast(entry => entry.status === "LIVE");
+  const nextDrop = data.drops.find(entry => entry.status === "UPCOMING");
+  const available = data.items.filter(item => item.status === "AVAILABLE" && item.locksOpen);
   const selectableItems = data.items.filter(item => {
     if (drop) return item.dropId === drop.id;
     if (filter === "no-drop") return !item.dropId;
@@ -67,6 +70,11 @@ export function Storefront({ initial }: { initial: StoreData }) {
   function applyOnlyFit(enabled: boolean) {
     setOnlyFit(enabled);
     writeLocal("lockdulu.onlyFit", enabled);
+  }
+
+  function browse(selection: string) {
+    setSelection(selection);
+    setCategory("All pieces");
   }
 
   function clearFilters() {
@@ -96,16 +104,28 @@ export function Storefront({ initial }: { initial: StoreData }) {
       </section>
       {stale && <AvailabilityNotice serverTime={data.serverTime} />}
       {!data.store.paymentReady && data.items.length > 0 && <p className="muted">You can browse this shop while the seller sets up payments.</p>}
-      <label className="drop-selector">Browse pieces <select ref={browseSelect} value={filter} onChange={event => { setSelection(event.target.value); setCategory("All pieces"); }}>
+      <nav className="store-browse" aria-label="Shop availability and drops">
+        <a className="button" href="#pieces" aria-current={filter === "available" ? "true" : undefined} onClick={() => browse("available")}>
+          <Tag size={17} aria-hidden="true" /> Available now <span className="muted">({available.length})</span>
+        </a>
+        {liveDrop && <a className="button" href="#pieces" aria-current={filter === liveDrop.id ? "true" : undefined} onClick={() => browse(liveDrop.id)}>
+          Live drop · {liveDrop.title}
+        </a>}
+        {nextDrop && <a className="button store-next-drop" href="#pieces" aria-current={filter === nextDrop.id ? "true" : undefined} onClick={() => browse(nextDrop.id)}>
+          <span>Next drop · {nextDrop.title}</span>
+          <time className="muted" dateTime={nextDrop.scheduledAt}>{malaysiaDropDate.format(new Date(nextDrop.scheduledAt))} MYT</time>
+        </a>}
+      </nav>
+      <label className="drop-selector">Browse pieces <select ref={browseSelect} value={filter} onChange={event => browse(event.target.value)}>
         <option value="all">All pieces</option>
         <option value="available">Available now</option>
         <option value="no-drop">No drop</option>
         {data.drops.map(entry => <option key={entry.id} value={entry.id}>{entry.title} ({entry.status === "LIVE" ? "live" : "upcoming"})</option>)}
       </select></label>
       {upcoming && <div className="launch glass"><Clock3 size={22} strokeWidth={1.5} /><div><strong>Locks open at launch</strong><p className="muted">Days / hours / minutes / seconds</p></div><strong className="timer">{timer(Date.parse(drop.scheduledAt) - now, true)}</strong></div>}
-      <section id="pieces" className="pieces">
+      <section id="pieces" className="pieces" tabIndex={-1} aria-labelledby="store-pieces-heading">
         <div className="section-heading"><div><span className="eyebrow"><ScanLine size={15} strokeWidth={1.5} /> {upcoming ? "Drop preview" : "Inventory"}</span>
-          <h2>{drop?.title ?? (filter === "available" ? "Available now" : filter === "no-drop" ? "Pieces with no drop" : "All pieces")}</h2></div>
+          <h2 id="store-pieces-heading">{drop?.title ?? (filter === "available" ? "Available now" : filter === "no-drop" ? "Pieces with no drop" : "All pieces")}</h2></div>
           <span className="piece-count" role="status" aria-atomic="true">{visible.length} {visible.length === 1 ? "piece" : "pieces"}</span>
         </div>
         <div className="filter-bar glass">
