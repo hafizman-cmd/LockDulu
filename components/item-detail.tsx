@@ -25,15 +25,13 @@ const deliveryKey = "lockdulu.rememberedDelivery";
 function Gallery({ item }: { item: GarmentView }) {
   const [index, setIndex] = useState(0);
   const [pin, setPin] = useState<number | null>(null);
-  const [photoLayout, setPhotoLayout] = useState<{ src: string; ratio: number } | null>(null);
+  const [loadedPhoto, setLoadedPhoto] = useState<string | null>(null);
   const touchdown = useRef(0);
   const photo = item.images[index];
   const photoName = photoNames[index] ?? "Photo";
-  const ratio = photoLayout && photoLayout.src === photo ? photoLayout.ratio : undefined;
-  const sizePhoto = useCallback((image: HTMLImageElement | null) => {
-    if (!photo || !image?.naturalWidth || !image.naturalHeight) return;
-    const ratio = image.naturalWidth / image.naturalHeight;
-    setPhotoLayout(current => current?.src === photo && current.ratio === ratio ? current : { src: photo, ratio });
+  const photoLoaded = !!photo && loadedPhoto === photo;
+  const markPhotoLoaded = useCallback((image: HTMLImageElement | null) => {
+    if (photo && image?.naturalWidth && image.naturalHeight) setLoadedPhoto(photo);
   }, [photo]);
   const go = (next: number) => { setIndex((next + item.images.length) % item.images.length); setPin(null); };
   return <div className="gallery">
@@ -43,14 +41,11 @@ function Gallery({ item }: { item: GarmentView }) {
         const dx = event.changedTouches[0].clientX - touchdown.current;
         if (Math.abs(dx) > 48) go(index + (dx < 0 ? 1 : -1));
       }}>
-      <div className="gallery-photo" data-sized={ratio ? true : undefined} style={ratio ? {
-        width: `min(100cqw, ${100 * ratio}cqh)`,
-        height: `min(100cqh, ${100 / ratio}cqw)`,
-      } : undefined}>
+      <div className="gallery-photo">
         <GarmentPhoto key={photo} src={photo} alt={`${item.title} · ${photoName}`}
-          ref={sizePhoto} onLoad={event => sizePhoto(event.currentTarget)}
-          onUnavailable={() => setPhotoLayout(current => current?.src === photo ? null : current)} />
-        {ratio && index < 2 && item.flawPins.map((point, i) => (point.photo ?? "front") === (index === 0 ? "front" : "back") && <button key={i} className="flaw-pin" style={{ left: `${point.x}%`, top: `${point.y}%` }}
+          ref={markPhotoLoaded} onLoad={event => markPhotoLoaded(event.currentTarget)}
+          onUnavailable={() => setLoadedPhoto(current => current === photo ? null : current)} />
+        {photoLoaded && index < 2 && item.flawPins.map((point, i) => (point.photo ?? "front") === (index === 0 ? "front" : "back") && <button key={i} className="flaw-pin" style={{ left: `${point.x}%`, top: `${point.y}%` }}
           aria-label={`View flaw ${i + 1} on ${photoName.toLowerCase()} photo`} aria-pressed={i === pin} onClick={() => setPin(pin === i ? null : i)}>{i + 1}</button>)}
       </div>
       {item.images.length > 1 && <div className="gallery-arrows">
@@ -58,7 +53,7 @@ function Gallery({ item }: { item: GarmentView }) {
         <button className="icon-button" aria-label="Next photo" onClick={() => go(index + 1)}><ChevronRight size={20} strokeWidth={1.5} /></button>
       </div>}
     </div>
-    {ratio && pin !== null && item.flawPins[pin] && <div className="pin-note" role="status"><b>{pin + 1}</b> {item.flawPins[pin].note}</div>}
+    {photoLoaded && pin !== null && item.flawPins[pin] && <div className="pin-note" role="status"><b>{pin + 1}</b> {item.flawPins[pin].note}</div>}
     {item.images.length > 1 && <div className="thumbnails" role="group" aria-label="Garment photos">
       {item.images.map((image, i) => <button className={i === index ? "selected" : ""} key={i} onClick={() => go(i)} aria-pressed={i === index}>
         <GarmentPhoto src={image} alt="" /><span>{photoNames[i] ?? "Photo"}</span>
