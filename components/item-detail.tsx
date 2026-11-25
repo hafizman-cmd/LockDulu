@@ -318,11 +318,11 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
     event.preventDefault();
     if (!quote || !active || !file || !preparedTotal || expired || receiptUnconfirmed || busy) return;
     const form = new FormData();
-    form.set("file", file); form.set("orderId", quote.orderId); form.set("token", active.token);
+    form.set("file", file);
     form.set("delivery", JSON.stringify(delivery));
     setBusy(true); setError("");
     try {
-      const result = await upload<Completed>("receipt", form);
+      const result = await upload<Completed>("receipt", form, { orderId: quote.orderId, token: active.token });
       rememberOrder(active, result);
       void refresh();
     } catch (exception) {
@@ -454,8 +454,9 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
               try { await navigator.clipboard.writeText(preparedTotal!); setCopied(true); setError(""); }
               catch { setError(`Copy the amount manually: ${preparedTotal}`); }
             }}><Copy size={17} strokeWidth={1.5} /> {copied ? "Amount copied" : "Copy Amount"}</button></div>
-          <label className="file-field"><ImagePlus size={22} strokeWidth={1.5} /><span>{file?.name ?? "Payment Receipt Screenshot"}<small>JPG, PNG, WebP, HEIF, or AVIF, up to 4 MB</small></span><input required type="file" accept="image/jpeg,image/png,image/webp,image/heif,image/heic,image/avif" aria-label="Payment receipt screenshot" disabled={busy || receiptUnconfirmed} onChange={event => setFile(event.target.files?.[0] ?? null)} /></label>
+          <label className="file-field"><ImagePlus size={22} strokeWidth={1.5} /><span>{file?.name ?? "Payment Receipt Screenshot"}<small>Large images are resized before upload. Make sure the payment details are readable.</small></span><input required type="file" accept="image/jpeg,image/png,image/webp,image/heif,image/heic,image/avif" aria-label="Payment receipt screenshot" disabled={busy || receiptUnconfirmed} onChange={event => setFile(event.target.files?.[0] ?? null)} /></label>
           {error && <Notice>{error}</Notice>}
+          {error && data.store.whatsappNumber && <a className="text-button" href={sellerLink} target="_blank" rel="noreferrer">Already paid? Contact the seller</a>}
           {receiptUnconfirmed ? <button className="button primary" type="button" disabled={busy} onClick={retryReceiptCheck}>{busy ? "Checking receipt…" : "Check receipt status"}</button> :
             <button className="button primary" disabled={busy || !file || expired}>{busy ? "Submitting receipt…" : "Submit payment receipt"}</button>}
           <button className="text-button" type="button" disabled={busy || receiptUnconfirmed} onClick={() => { setStep(1); setError(""); }}>Edit delivery before paying</button>

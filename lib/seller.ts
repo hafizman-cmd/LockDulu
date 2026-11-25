@@ -61,6 +61,7 @@ export async function dashboardData(sellerId: string) {
         dispatchRequestedAt: order.dispatchRequestedAt?.toISOString() ?? null, garment: garmentView(garment),
         dispatchGroupId: order.dispatchGroupId, shipmentUnconfirmed: order.shipmentUnconfirmed,
         hasReceipt: !!order.receiptImageUrl,
+        receiptSubmittedAt: (order.receiptSubmittedAt ?? order.createdAt).toISOString(),
       }];
     }),
     serverTime: Date.now(),

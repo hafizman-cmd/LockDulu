@@ -10,6 +10,7 @@ import { createDrop, dashboardData, deleteGarment, editGarment, listGarment, loc
 import { buyerTransferUpdate, delivery, id, listing, listingEdit, newDrop, orderNumber, phone, receiptRejection, sellerTransferUpdate, settings, shopProfile, token, transferReference, transferVersion } from "@/lib/validation";
 import { existingShop } from "@/lib/shop-status";
 import { storage } from "@/lib/storage";
+import { checkoutClientKey } from "@/lib/request-budget";
 
 const reservedHandles = new Set([
   "admin", "api", "dashboard", "item", "locker", "sample", "uploads", "models", "_next",
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
         if (metadata?.format !== "webp" || !metadata.width || !metadata.height) {
           throw new HttpError("This shop's payment QR is unreadable. Contact the seller before paying.", 409);
         }
-      });
+      }, checkoutClientKey(request));
       case "order": return orderState(id.parse(body.id), token.parse(body.token));
       case "preparePayment": return preparePayment(id.parse(body.id), token.parse(body.token), delivery.parse(body.delivery));
       case "reportTransfer": return reportTransfer(id.parse(body.id), token.parse(body.token), transferReference.parse(body.reference));

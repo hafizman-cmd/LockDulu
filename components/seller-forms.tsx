@@ -4,6 +4,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ImagePlus, Minus, Plus, QrCo
 import { categories, grades, type GarmentView, type Pin } from "@/lib/catalog";
 import { garmentBackgrounds, makeGarmentPhoto, prepareGarmentCutout, type GarmentBackground } from "@/lib/garment-background";
 import type { DashboardData } from "@/lib/seller";
+import { imageSelectionSizeMessage, maxSelectedImage } from "@/lib/upload-limits";
 import { action, message, randomToken, readLocal, removeLocal, RequestError, upload, writeLocal } from "./client";
 import { GarmentPhoto, Notice, Sheet } from "./common";
 
@@ -322,11 +323,12 @@ export function ShopProfile({ seller, onSaved }: { seller: DashboardData["seller
     <div className="stack">
       <strong>Storefront image</strong>
       <img className="banner-preview" src={preview ?? banner ?? "/sample/drop-jacket.svg"} alt="Storefront image preview" />
-      <label className="file-field"><ImagePlus size={22} strokeWidth={1.5} /><span>Choose image<small>JPG, PNG, WebP or HEIF, under 4 MB. The image is cropped to fit the storefront.</small></span>
+      <label className="file-field"><ImagePlus size={22} strokeWidth={1.5} /><span>Choose image<small>Large photos are resized before upload. The image is cropped to fit the storefront.</small></span>
         <input type="file" aria-label="Choose storefront image" accept="image/jpeg,image/png,image/webp,image/heif,image/heic,image/avif" disabled={busy} onChange={event => {
           const file = event.target.files?.[0]; event.target.value = "";
           if (!file) return;
-          if (file.size > 4 * 1024 * 1024 || !file.size) { setError("Choose an image smaller than 4 MB."); return; }
+          if (!file.size) { setError("Choose a readable image."); return; }
+          if (file.size > maxSelectedImage) { setError(imageSelectionSizeMessage); return; }
           setError(""); setBannerFile(file);
         }} />
       </label>

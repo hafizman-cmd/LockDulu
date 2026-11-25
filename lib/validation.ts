@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { categories, grades, receiptRejectionLabels } from "./catalog";
-import { normalizePhone, tokenPattern } from "./security";
+import { categories, grades, receiptRejectionLabels } from "./catalog.ts";
+import { normalizePhone, tokenPattern } from "./security.ts";
 
 export const id = z.string().min(1).max(100);
 export const orderNumber = z.string().trim().min(1, "Enter your order number.").max(100).toLowerCase();

@@ -190,3 +190,11 @@ model OrderItem {
 
   @@index([orderId])
 }
+
+model RequestBudget {
+  key       String @id
+  count     Int
+  expiresAt BigInt
+
+  @@index([expiresAt])
+}

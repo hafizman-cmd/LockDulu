@@ -3,6 +3,7 @@ import { db, writeTransaction } from "./db.ts";
 import type { GarmentView, Pin, Quote } from "./catalog";
 import { HttpError } from "./http.ts";
 import { paymentConfigured, samplePaymentQr } from "./payment.ts";
+import { limitLockRequest, limitNewReservation } from "./request-budget.ts";
 import { hashToken } from "./security.ts";
 import { activeShop, existingShop, requireOrderSeller } from "./shop-status.ts";
 import type { z } from "zod";
@@ -116,15 +117,22 @@ function quote(order: Order, lockedUntil: Date): Quote {
   };
 }
 
-export async function lockItem(id: string, token: string, checkPaymentImage?: (url: string) => Promise<void>) {
+export async function lockItem(id: string, token: string, checkPaymentImage?: (url: string) => Promise<void>, client: string | null = null) {
   const hash = hashToken(token);
   const item = await db().garment.findUnique({ where: { id, seller: activeShop, hidden: false, deletedAt: null },
-    select: { sellerId: true, lockSessionToken: true, lockedUntil: true, seller: { select: paymentSelect } } });
+    select: { sellerId: true, status: true, lockSessionToken: true, lockedUntil: true, seller: { select: paymentSelect } } });
   if (!item) throw new HttpError("This garment could not be found.", 404);
-  const resuming = item.lockSessionToken === hash && item.lockedUntil && item.lockedUntil > new Date();
-  if (!resuming && paymentConfigured(item.seller) && item.seller.qrCodeUrl !== samplePaymentQr) {
-    if (!checkPaymentImage) throw new HttpError("This shop's payment QR could not be checked.", 503);
-    await checkPaymentImage(item.seller.qrCodeUrl);
+  const now = new Date();
+  const resuming = item.lockSessionToken === hash && item.lockedUntil && item.lockedUntil > now;
+  if (!resuming) {
+    if (item.status !== "AVAILABLE" && !(item.status === "LOCKED" && item.lockedUntil && item.lockedUntil <= now)) {
+      throw new HttpError("This piece is no longer available to lock.", 409);
+    }
+    if (client) await limitLockRequest(client);
+    if (paymentConfigured(item.seller) && item.seller.qrCodeUrl !== samplePaymentQr) {
+      if (!checkPaymentImage) throw new HttpError("This shop's payment QR could not be checked.", 503);
+      await checkPaymentImage(item.seller.qrCodeUrl);
+    }
   }
   await openDueDrops(item.sellerId);
   return writeTransaction(async tx => {
@@ -154,6 +162,7 @@ export async function lockItem(id: string, token: string, checkPaymentImage?: (u
     if (resuming || !paymentConfigured(seller) || seller.qrCodeUrl !== item.seller.qrCodeUrl) {
       throw new HttpError("This shop's payment setup is unavailable. Contact the seller or try again later.", 409);
     }
+    await limitNewReservation(tx, id, seller.id, client);
     const order = await tx.order.create({ data: {
       sellerId: seller.id, buyerAccessHash: hash, garmentCode: garment.code, garmentTitle: garment.title, itemAmount: garment.price,
       shippingFee: seller.shippingFee, totalAmount: garment.price.plus(seller.shippingFee), holdBoxDays: seller.holdBoxDays,
@@ -284,7 +293,41 @@ export async function updateBuyerTransfer(orderId: string, token: string, versio
   });
 }
 
-export async function submitReceipt(orderId: string, token: string, details: z.infer<typeof delivery>, receiptImageUrl: string) {
+type ReceiptDelivery = z.infer<typeof delivery>;
+const receiptDeliveryFields = { buyerName: true, buyerPhone: true, shippingAddress: true, fulfillmentType: true } as const;
+
+export function requireReceiptDelivery(order: ReceiptDelivery, details: ReceiptDelivery) {
+  if (!order.buyerPhone || order.buyerPhone !== details.buyerPhone || order.buyerName !== details.buyerName ||
+      order.shippingAddress !== details.shippingAddress || order.fulfillmentType !== details.fulfillmentType) {
+    throw new HttpError("Checkout details changed. Review the prepared amount and delivery before submitting your receipt.", 409);
+  }
+}
+
+export async function authorizeReceiptUpload(orderId: string, token: string) {
+  const hash = hashToken(token);
+  const order = await db().order.findUnique({
+    where: { id: orderId, buyerAccessHash: hash },
+    select: {
+      ...receiptDeliveryFields, paymentStatus: true, garmentCode: true, sellerId: true, seller: { select: { status: true } },
+      items: {
+        where: { garment: { status: "LOCKED", lockSessionToken: hash, lockedUntil: { gt: new Date() } } },
+        select: { id: true }, take: 1,
+      },
+    },
+  });
+  if (!order) throw new HttpError("This checkout could not be found.", 404);
+  const { paymentStatus: status, garmentCode: code } = order;
+  if (status === "PENDING_VERIFICATION" || status === "VERIFIED_PAID") {
+    return { completed: { orderId, code, status } } as const;
+  }
+  if (status !== "AWAITING_RECEIPT" || order.seller.status !== "ACTIVE" || !order.items.length) {
+    throw new HttpError("Your lock has expired or been released.", 409);
+  }
+  if (!order.buyerPhone) throw new HttpError("Prepare your payment before submitting a receipt.", 409);
+  return { order } as const;
+}
+
+export async function submitReceipt(orderId: string, token: string, details: ReceiptDelivery, receiptImageUrl: string) {
   return writeTransaction(async tx => {
     const hash = hashToken(token);
     const order = await tx.order.findUnique({ where: { id: orderId, buyerAccessHash: hash, seller: activeShop }, include: { items: true } });
@@ -293,11 +336,8 @@ export async function submitReceipt(orderId: string, token: string, details: z.i
       return { orderId, code: order.garmentCode, status: order.paymentStatus, stored: false };
     }
     const garmentId = order.items[0]?.garmentId;
-    if (!garmentId) throw new HttpError("Your lock has expired.", 409);
-    if (!order.buyerPhone || order.buyerPhone !== details.buyerPhone || order.buyerName !== details.buyerName ||
-        order.shippingAddress !== details.shippingAddress || order.fulfillmentType !== details.fulfillmentType) {
-      throw new HttpError("Checkout details changed. Review the prepared amount and delivery before submitting your receipt.", 409);
-    }
+    if (order.paymentStatus !== "AWAITING_RECEIPT" || !garmentId) throw new HttpError("Your lock has expired.", 409);
+    requireReceiptDelivery(order, details);
     const changed = await tx.garment.updateMany({
       where: { id: garmentId, seller: activeShop, status: "LOCKED", lockSessionToken: hash, lockedUntil: { gt: new Date() } },
       data: { status: "PENDING_VERIFICATION", lockSessionToken: null, lockedUntil: null },

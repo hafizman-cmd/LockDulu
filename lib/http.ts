@@ -31,15 +31,21 @@ export function requireOrigin(request: Request) {
   throw new HttpError("This request must come from LockDulu.", 403);
 }
 
-export async function limitBody(request: Request, maxBytes: number) {
+export async function limitBody(request: Request, maxBytes: number, timeoutMs?: number) {
   if (Number(request.headers.get("content-length")) > maxBytes) throw new HttpError("Request is too large.", 413);
   const reader = request.body?.getReader();
   if (!reader) throw new HttpError("Request body is required.");
   const chunks: Uint8Array[] = [];
   let size = 0;
+  let timedOut = false;
+  const deadline = timeoutMs && setTimeout(() => {
+    timedOut = true;
+    void reader.cancel().catch(() => {});
+  }, timeoutMs);
   try {
     while (true) {
       const { done, value } = await reader.read();
+      if (timedOut) throw new HttpError("The upload timed out. Try again on a stable connection.", 408);
       if (done) break;
       size += value.byteLength;
       if (size > maxBytes) {
@@ -49,6 +55,7 @@ export async function limitBody(request: Request, maxBytes: number) {
       chunks.push(value);
     }
   } finally {
+    if (deadline) clearTimeout(deadline);
     reader.releaseLock();
   }
   return new Response(new Blob(chunks as Uint8Array<ArrayBuffer>[]), { headers: { "Content-Type": request.headers.get("content-type") ?? "" } });

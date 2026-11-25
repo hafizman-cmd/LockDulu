@@ -21,6 +21,7 @@ const tabs = [
   { key: "history", label: "History", icon: History },
   { key: "settings", label: "Settings", icon: Settings },
 ] as const;
+const receiptReviewHours = 24;
 
 export function SellerLogin() {
   const router = useRouter();
@@ -122,6 +123,7 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
     setDeleting(null);
   }, [held]);
   const pending = data.orders.filter(order => order.paymentStatus === "PENDING_VERIFICATION");
+  const overdueReceipts = pending.filter(order => Date.parse(order.receiptSubmittedAt) <= now - receiptReviewHours * 3_600_000);
   const verified = data.orders.filter(order => order.paymentStatus === "VERIFIED_PAID");
   const immediate = verified.filter(order => order.fulfillmentType === "SHIP_NOW");
   const readyToShip = immediate.filter(order => !order.shipmentUnconfirmed);
@@ -212,8 +214,13 @@ export function Dashboard({ initial, publicOrigin }: { initial: DashboardData; p
       </nav>
       {error && <Notice>{error}</Notice>}
       {success && <Notice success>{success}</Notice>}
+      {overdueReceipts.length > 0 && <Notice>
+        {overdueReceipts.length === 1 ? "One receipt has" : `${overdueReceipts.length} receipts have`} been waiting at least {receiptReviewHours} hours.
+        {" "}{tab === "receipts" ? "Check your bank and contact the buyer if you cannot match the transfer."
+          : <button className="text-button" onClick={() => setTab("receipts")}>Review receipts</button>}
+      </Notice>}
       {tab === "receipts" && <section className="dash-section stack">
-        <div className="section-heading"><div><h2>Receipt verification</h2><p className="muted">Check each screenshot against your bank or eWallet before confirming.</p></div><span className="piece-count">{pending.length} pending</span></div>
+        <div className="section-heading"><div><h2>Receipt verification</h2><p className="muted">Review within {receiptReviewHours} hours. Check each screenshot against your bank or eWallet before confirming.</p></div><span className="piece-count">{pending.length} pending</span></div>
         {pending.length === 0 && <div className="surface empty"><ReceiptText size={31} strokeWidth={1.5} /><h3>No receipts to review</h3><p>Buyer payment screenshots appear here as they arrive.</p></div>}
         {pending.map(order => <article key={order.id} className="surface receipt-order">
           <div className="order-body">

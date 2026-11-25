@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { prepareUploadImage } from "@/lib/prepare-upload-image";
 
 export class RequestError extends Error {
   constructor(message: string, public status: number) { super(message); }
@@ -19,12 +20,16 @@ export function action<T>(name: string, data: object = {}, signal?: AbortSignal)
   });
 }
 
-export function upload<T>(kind: "garment" | "qr" | "receipt", form: FormData) {
+export async function upload<T>(...args: [kind: "garment" | "qr", form: FormData] |
+  [kind: "receipt", form: FormData, access: { orderId: string; token: string }]) {
+  const [kind, form, access] = args;
   const file = form.get("file");
-  if (file instanceof File && file.size > 4 * 1024 * 1024) {
-    return Promise.reject(new Error("Choose an image smaller than 4 MB."));
+  if (file instanceof File) {
+    const prepared = await prepareUploadImage(file, kind);
+    if (prepared !== file) form.set("file", prepared);
   }
-  return json<T>(`/api/upload?kind=${kind}`, { method: "POST", body: form });
+  const headers = access ? { Authorization: `Bearer ${access.token}`, "X-LockDulu-Order": access.orderId } : undefined;
+  return json<T>(`/api/upload?kind=${kind}`, { method: "POST", body: form, headers });
 }
 
 export function message(error: unknown) {
