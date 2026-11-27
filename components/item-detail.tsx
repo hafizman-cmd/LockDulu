@@ -8,7 +8,7 @@ import {
 import { buyerStatus, grades, malaysiaTime, money, rejectionMessage, timer, whatsapp, type GarmentView, type Quote } from "@/lib/catalog";
 import type { readItem } from "@/lib/inventory";
 import { action, forgetLock, json, message, randomToken, readLocal, removeLocal, RequestError, savedLocks, saveLock, upload, useClock, usePolling, writeLocal, type SavedLock } from "./client";
-import { AvailabilityNotice, Footer, GarmentPhoto, Header, Notice, OrderReference, Sheet, Stage } from "./common";
+import { AvailabilityNotice, CatalogUnavailable, Footer, GarmentPhoto, Header, Notice, OrderReference, Sheet, Stage } from "./common";
 
 type ItemData = NonNullable<Awaited<ReturnType<typeof readItem>>>;
 type Delivery = { buyerName: string; buyerPhone: string; shippingAddress: string; fulfillmentType: "SHIP_NOW" | "HOLD_BOX" };
@@ -21,6 +21,7 @@ type Completed = { orderId: string; code: string; status: Exclude<OrderStatus, "
 const defaultDelivery: Delivery = { buyerName: "", buyerPhone: "", shippingAddress: "", fulfillmentType: "SHIP_NOW" };
 const photoNames = ["Front", "Back", "Tag"];
 const deliveryKey = "lockdulu.rememberedDelivery";
+const storageWarning = "This browser couldn’t save access to your order. Before paying, allow browser storage and try again, or open LockDulu in your regular browser.";
 
 function Gallery({ item }: { item: GarmentView }) {
   const [index, setIndex] = useState(0);
@@ -81,14 +82,8 @@ function Schematic({ item }: { item: GarmentView }) {
 export function ItemDetail({ initial }: { initial: ItemData }) {
   const { id } = initial.item;
   const router = useRouter();
-  const get = useCallback(async (signal?: AbortSignal) => {
-    try { return await json<ItemData>(`/api/item/${id}`, { signal }); }
-    catch (error) {
-      if (error instanceof RequestError && error.status === 404) router.refresh();
-      throw error;
-    }
-  }, [id, router]);
-  const [data, setData, stale] = usePolling(initial, get);
+  const get = useCallback((signal?: AbortSignal) => json<ItemData>(`/api/item/${id}`, { signal }), [id]);
+  const [data, , status, refresh] = usePolling(initial, get);
   const [initialServerTime] = useState(initial.serverTime);
   const [lockTime, setLockTime] = useState(0);
   const now = useClock(Math.max(lockTime, data.serverTime));
@@ -100,6 +95,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
   const [delivery, setDelivery] = useState(defaultDelivery);
   const [rememberDelivery, setRememberDelivery] = useState(false);
   const [preparedTotal, setPreparedTotal] = useState<string | null>(null);
+  const [orderAccessSaved, setOrderAccessSaved] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -113,7 +109,6 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
   const item = data.item;
   const addressRef = useRef<HTMLInputElement>(null);
   const restoreRequest = useRef<AbortController | null>(null);
-  const refresh = useCallback(() => get().then(next => setData(current => next.serverTime >= current.serverTime ? next : current)).catch(() => {}), [get, setData]);
 
   const rememberOrder = useCallback((stored: SavedLock, result: Completed) => {
     const saved = { ...stored, submitted: result.status !== "EXPIRED" };
@@ -136,6 +131,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
       if (aborter.signal.aborted) return;
       setLockTime(result.serverTime);
       if (result.quote) {
+        setOrderAccessSaved(saveLock(stored));
         setQuote(result.quote);
         if (result.delivery) setDelivery(result.delivery);
         setPreparedTotal(result.paymentTotal);
@@ -236,6 +232,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
   }, [active, done, refresh]);
 
   async function startLock() {
+    if (status === "unavailable") return;
     setError("");
     if (running || canViewOrder) { setOpen(true); return; }
     if (canRetry && active?.orderId) {
@@ -247,9 +244,9 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
       itemId: id, token: randomToken(),
       storeSlug: data.store.storeSlug,
     };
+    if (!saveLock(saved)) { setError(storageWarning); return; }
     setBusy(true);
     setActive(saved);
-    saveLock(saved);
     try {
       const result = await action<LockResponse>("lock", { id, token: saved.token });
       const reserved = { ...saved, orderId: result.quote.orderId, lockedUntil: result.quote.lockedUntil };
@@ -272,6 +269,9 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
     if (!/^60[1-9]\d{7,9}$/.test(normalized)) { setError("Enter a valid Malaysian WhatsApp number."); return; }
     if (delivery.shippingAddress.trim().length < 8) { setError("Enter a complete delivery address."); addressRef.current?.focus(); return; }
     if (delivery.buyerName.trim().length < 2) { setError("Enter the buyer's name."); return; }
+    const accessSaved = saveLock(active);
+    setOrderAccessSaved(accessSaved);
+    if (!accessSaved) { setError(storageWarning); return; }
     setBusy(true); setError("");
     try {
       const { total } = await action<{ total: string }>("preparePayment", { id: quote.orderId, token: active.token, delivery });
@@ -359,6 +359,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
     : `Hi, I have a question about LockDulu order ${reference} (${item.code}).`);
   return <>
     <Header storeSlug={data.store.storeSlug} />
+    {status === "unavailable" ? <CatalogUnavailable shopHref={storeHref} ordersHref={trackerHref} /> : <>
     <main className="wrap item-page">
       <Link className="breadcrumb" href={storeHref} replace prefetch={false} onClick={backToPreviousPage}>
         <ChevronLeft size={18} strokeWidth={1.5} aria-hidden="true" /> Back
@@ -383,7 +384,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
           </div>
           <Schematic item={item} />
           <p className="detail-hint"><ShieldCheck size={18} strokeWidth={1.5} /> One piece available per listing. Receipt verification is handled by the seller.</p>
-          {stale && <AvailabilityNotice serverTime={data.serverTime} />}
+          {status === "stale" && <AvailabilityNotice serverTime={data.serverTime} />}
           {paymentUnavailable && <Notice>This shop hasn’t set up payments yet. Check back later or ask the seller.</Notice>}
           {reference && needsHelp && <button type="button" className="button" onClick={() => setOpen(true)}>Get help with your previous order</button>}
         </div>
@@ -399,6 +400,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
         {!open && error && <Notice>{error}</Notice>}
       </div>
     </div>
+    </>}
     {open && (quote || done) && <Sheet title={done?.status === "EXPIRED" || expired && !busy ? "Reservation expired" : done?.status === "VERIFIED_PAID" ? "Payment confirmed" : done?.status === "REJECTED" ? "Payment receipt rejected" : done ? "Payment receipt received" : "Checkout"} closeDisabled={busy} onClose={() => { setOpen(false); setError(""); }}>
       {done?.status === "EXPIRED" || expired && !busy ? <div className="stack">
         <Notice>Your ten-minute reservation ended. The garment may now be available to another buyer.</Notice>
@@ -419,6 +421,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
         <div className="checkout-status"><span role="status">Step {step} of 2 · {step === 1 ? "Delivery" : "DuitNow payment"}</span><strong className="timer"><Clock3 size={17} aria-hidden="true" />{timer(remaining)} left</strong></div>
         {step === 1 ? <form className="stack" onSubmit={continueToPayment}>
           <p className="muted">Your reservation covers delivery details, the bank transfer, and receipt upload.</p>
+          <p className="muted">Return to this same browser after paying to upload your receipt and track your order.</p>
           <fieldset className="stack" disabled={busy}>
           <label>Buyer name<input required autoComplete="name" maxLength={100} value={delivery.buyerName} onChange={event => setDelivery({ ...delivery, buyerName: event.target.value })} /></label>
           <label>WhatsApp phone<input required type="tel" autoComplete="tel" maxLength={30} placeholder="012 345 6789" value={delivery.buyerPhone} onChange={event => setDelivery({ ...delivery, buyerPhone: event.target.value })} /></label>
@@ -435,7 +438,11 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
           {error && <Notice>{error}</Notice>}
           <button className="button primary" disabled={busy}>{busy ? "Checking reservation…" : `Continue to payment · ${money(exact!)}`}</button>
         </form> : <form className="stack" onSubmit={sendReceipt}>
-          <section className="checkout-payment stack" aria-labelledby="payment-heading">
+          {!orderAccessSaved && <div className="stack">
+            <Notice>{storageWarning} If you already paid, keep this page open and upload your receipt below.</Notice>
+            <button className="button" type="button" onClick={() => setOrderAccessSaved(!!active && saveLock(active))}>Check browser storage again</button>
+          </div>}
+          {orderAccessSaved && <section className="checkout-payment stack" aria-labelledby="payment-heading">
             <h3 id="payment-heading">Pay with DuitNow QR</h3>
             <div className={`qr-card surface${expandedQr ? " qr-expanded" : ""}`}>
               <div className="payment-payee">
@@ -465,7 +472,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
                 {receiptUnconfirmed ? "Go to receipt status" : "Already paid? Go to upload"}
               </button>
             </div>
-          </section>
+          </section>}
           <section className="checkout-receipt stack" aria-labelledby="checkout-receipt-heading">
             <h3 id="checkout-receipt-heading" tabIndex={-1}>{receiptUnconfirmed ? "Check your receipt status" : "Upload your payment receipt"}</h3>
             <div hidden={receiptUnconfirmed}>
@@ -476,7 +483,7 @@ export function ItemDetail({ initial }: { initial: ItemData }) {
             {receiptUnconfirmed ? <button className="button primary" type="button" disabled={busy} onClick={retryReceiptCheck}>{busy ? "Checking receipt…" : "Check receipt status"}</button> :
               <button className="button primary" disabled={busy || !file || expired}>{busy ? "Submitting receipt…" : "Submit payment receipt"}</button>}
           </section>
-          <OrderReference key={quote.orderId} number={quote.orderId} />
+          <OrderReference key={quote.orderId} number={quote.orderId} showHint />
         </form>}
       </>}
     </Sheet>}

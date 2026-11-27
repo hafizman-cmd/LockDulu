@@ -142,6 +142,19 @@ export function AvailabilityNotice({ serverTime }: { serverTime: number }) {
     Check your connection to refresh.</p>;
 }
 
+export function CatalogUnavailable({ shopHref, ordersHref = "/locker" }: { shopHref?: string; ordersHref?: string }) {
+  return <main className="wrap centered"><div className="empty surface">
+    <div role="status">
+      <h1>{shopHref ? "Item unavailable" : "Shop unavailable"}</h1>
+      <p>{shopHref ? "This listing is no longer available to browse." : "This shop is no longer available to browse."}</p>
+    </div>
+    <div className="button-row">
+      <Link className="button primary" href={shopHref ?? "/"}>{shopHref ? "Back to shop" : "Browse shops"}</Link>
+      <Link className="button" href={ordersHref}>My orders</Link>
+    </div>
+  </div></main>;
+}
+
 export function OrderReference({ number, showHint = false }: { number: string; showHint?: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   const [feedback, setFeedback] = useState("");
@@ -157,7 +170,7 @@ export function OrderReference({ number, showHint = false }: { number: string; s
         setFeedback("Order number selected. Copy it from the field.");
       }
     }}><Copy size={18} strokeWidth={1.5} /></button>
-    {showHint && <p className="muted">Save this number to track your order in My orders.</p>}
+    {showHint && <p className="muted">Save this number and use this same browser to track your order in My orders.</p>}
     <p role="status" className="muted">{feedback}</p>
   </div>;
 }

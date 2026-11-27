@@ -1,12 +1,11 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Clock3, Globe2, Grid2x2, ScanLine, SlidersHorizontal, Tag } from "lucide-react";
 import type { readStore } from "@/lib/inventory";
 import { categories, grades, malaysiaDropDate, measurements, money, timer } from "@/lib/catalog";
-import { ActiveLock, AvailabilityNotice, Footer, GarmentPhoto, Header, Sheet, Stage } from "./common";
-import { json, readLocal, RequestError, useClock, usePolling, writeLocal } from "./client";
+import { ActiveLock, AvailabilityNotice, CatalogUnavailable, Footer, GarmentPhoto, Header, Sheet, Stage } from "./common";
+import { json, readLocal, useClock, usePolling, writeLocal } from "./client";
 
 type StoreData = NonNullable<Awaited<ReturnType<typeof readStore>>>;
 const fitFields = [
@@ -19,15 +18,8 @@ const fits = (value: number, min: string, max: string) => (!min || value >= Numb
 
 export function Storefront({ initial }: { initial: StoreData }) {
   const slug = initial.store.storeSlug;
-  const router = useRouter();
-  const get = useCallback(async (signal?: AbortSignal) => {
-    try { return await json<StoreData>(`/api/store/${encodeURIComponent(slug)}`, { signal }); }
-    catch (error) {
-      if (error instanceof RequestError && error.status === 404) router.refresh();
-      throw error;
-    }
-  }, [slug, router]);
-  const [data, , stale] = usePolling(initial, get);
+  const get = useCallback((signal?: AbortSignal) => json<StoreData>(`/api/store/${encodeURIComponent(slug)}`, { signal }), [slug]);
+  const [data, , status] = usePolling(initial, get);
   const now = useClock(data.serverTime);
   const [category, setCategory] = useState<string>("All pieces");
   const [onlyFit, setOnlyFit] = useState(false);
@@ -84,6 +76,8 @@ export function Storefront({ initial }: { initial: StoreData }) {
     browseSelect.current?.focus();
   }
 
+  if (status === "unavailable") return <><Header /><CatalogUnavailable /><Footer /></>;
+
   return <>
     <Header storeSlug={slug} />
     <main className="wrap storefront">
@@ -102,7 +96,7 @@ export function Storefront({ initial }: { initial: StoreData }) {
           <div className="hero-art hero-art-custom" aria-hidden="true"><img src={data.store.bannerImageUrl} alt="" onError={() => setFailedBanner(data.store.bannerImageUrl)} /></div> :
           <div className="hero-art" aria-hidden="true"><div className="hero-outline"/><span className="hero-axis axis-a"/><span className="hero-axis axis-b"/><img src="/sample/drop-jacket.svg" alt="" /></div>}
       </section>
-      {stale && <AvailabilityNotice serverTime={data.serverTime} />}
+      {status === "stale" && <AvailabilityNotice serverTime={data.serverTime} />}
       {!data.store.paymentReady && data.items.length > 0 && <p className="muted">You can browse this shop while the seller sets up payments.</p>}
       <nav className="store-browse" aria-label="Shop availability and drops">
         <a className="button" href="#pieces" aria-current={filter === "available" ? "true" : undefined} onClick={() => browse("available")}>

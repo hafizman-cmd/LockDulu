@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { prepareUploadImage } from "@/lib/prepare-upload-image";
 
 export class RequestError extends Error {
@@ -60,6 +60,7 @@ export function saveLock(lock: SavedLock) {
   knownLocks = [lock, ...savedLocks().filter(candidate => candidate.token !== lock.token)].slice(0, 100);
   writeLocal(lockKey, knownLocks);
   window.dispatchEvent(new Event("lockdulu-lock"));
+  return readLocal<SavedLock[]>(lockKey, []).some(candidate => candidate.token === lock.token && candidate.orderId === lock.orderId);
 }
 export function forgetLock(token: string) {
   knownLocks = savedLocks().filter(candidate => candidate.token !== token);
@@ -85,11 +86,14 @@ export function useClock(serverTime: number) {
 
 export function usePolling<T extends { serverTime: number }>(initial: T, get: (signal?: AbortSignal) => Promise<T>, interval = 4000) {
   const [data, setData] = useState(initial);
-  const [stale, setStale] = useState(false);
+  const [status, setStatus] = useState<"current" | "stale" | "unavailable">("current");
+  const refreshRequest = useRef<() => void>(null);
+  const refresh = useCallback(() => refreshRequest.current?.(), []);
   useEffect(() => { setData(initial); }, [initial]);
   useEffect(() => {
     const aborter = new AbortController();
     let busy = false;
+    const markStale = () => setStatus(current => current === "unavailable" ? current : "stale");
     const run = async () => {
       if (busy || document.visibilityState === "hidden") return;
       busy = true;
@@ -97,26 +101,30 @@ export function usePolling<T extends { serverTime: number }>(initial: T, get: (s
         const next = await get(aborter.signal);
         if (!aborter.signal.aborted) {
           setData(current => next.serverTime >= current.serverTime ? next : current);
-          setStale(false);
+          setStatus("current");
         }
-      } catch {
-        if (!aborter.signal.aborted) setStale(true);
+      } catch (error) {
+        if (!aborter.signal.aborted) {
+          if (error instanceof RequestError && error.status === 404) setStatus("unavailable");
+          else markStale();
+        }
       }
       finally { busy = false; }
     };
+    refreshRequest.current = run;
     const intervalId = window.setInterval(run, interval);
-    const markOffline = () => setStale(true);
-    if (!navigator.onLine) markOffline();
+    if (!navigator.onLine) markStale();
     document.addEventListener("visibilitychange", run);
     window.addEventListener("online", run);
-    window.addEventListener("offline", markOffline);
+    window.addEventListener("offline", markStale);
     return () => {
+      refreshRequest.current = null;
       aborter.abort();
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", run);
       window.removeEventListener("online", run);
-      window.removeEventListener("offline", markOffline);
+      window.removeEventListener("offline", markStale);
     };
   }, [get, interval]);
-  return [data, setData, stale] as const;
+  return [data, setData, status, refresh] as const;
 }

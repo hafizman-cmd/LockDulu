@@ -30,5 +30,5 @@ export async function generateMetadata(props: Props) {
 export default async function StorePage(props: Props) {
   const data = await loadStore(await storeSlug(props));
   if (!data) notFound();
-  return <Storefront initial={data} />;
+  return <Storefront key={data.store.storeSlug} initial={data} />;
 }

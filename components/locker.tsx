@@ -36,7 +36,7 @@ async function loadSavedOrders(signal?: AbortSignal) {
   return result.orders;
 }
 
-const orderNotFound = "This order wasn’t found in this browser. Check the order number and use the browser you used at checkout.";
+const orderNotFound = "This order wasn’t found. Check the order number and open My orders in the same browser you used at checkout, with its saved site data.";
 
 function orderLabel(order: LockerOrder, now: number) {
   if (order.transferResolvedAt) return "You confirmed your refund";
@@ -221,7 +221,7 @@ export function Locker({ reference }: { reference: string }) {
       {success && <Notice success>{success}</Notice>}
       {orders?.length === 0 && <div className="surface empty">
         <Box size={24} aria-hidden="true" /><h2>No saved orders</h2>
-        <p>Open My orders in the browser you used at checkout to see your orders.</p>
+        <p>Open My orders in the same browser you used at checkout, with its saved site data, to see your orders.</p>
         <Link className="button" href="/">Browse shops</Link>
       </div>}
       {!!orders?.length && displayed && <div className="stack locker-results">
